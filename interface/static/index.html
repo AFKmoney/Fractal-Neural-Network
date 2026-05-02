@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neural Fractal Network</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <!-- Fractal canvas background -->
+  <canvas id="bg-canvas"></canvas>
+
+  <div id="app">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div id="logo">
+        <div id="logo-icon">
+          <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="20" cy="20" r="18" stroke="url(#grad)" stroke-width="2"/>
+            <circle cx="20" cy="20" r="9" stroke="url(#grad)" stroke-width="1.5" opacity="0.7"/>
+            <circle cx="20" cy="20" r="4" fill="url(#grad)" opacity="0.9"/>
+            <line x1="2" y1="20" x2="38" y2="20" stroke="url(#grad)" stroke-width="1" opacity="0.4"/>
+            <line x1="20" y1="2" x2="20" y2="38" stroke="url(#grad)" stroke-width="1" opacity="0.4"/>
+            <defs>
+              <linearGradient id="grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#6ee7f7"/>
+                <stop offset="100%" stop-color="#a78bfa"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div>
+          <div id="logo-title">NFN</div>
+          <div id="logo-sub">Neural Fractal Network</div>
+        </div>
+      </div>
+
+      <nav id="tabs">
+        <button class="tab-btn active" data-tab="chat">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M2 5a2 2 0 012-2h12a2 2 0 012 2v7a2 2 0 01-2 2H6l-4 4V5z"/></svg>
+          Chat
+        </button>
+        <button class="tab-btn" data-tab="code">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 11-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+          Code
+        </button>
+        <button class="tab-btn" data-tab="agent">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z"/></svg>
+          Agent
+        </button>
+        <button class="tab-btn" data-tab="train">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11 4a1 1 0 10-2 0v4a1 1 0 102 0V7zm-3 1a1 1 0 10-2 0v3a1 1 0 102 0V8zM8 9a1 1 0 00-2 0v2a1 1 0 102 0V9z" clip-rule="evenodd"/></svg>
+          Entraînement
+        </button>
+        <button class="tab-btn" data-tab="info">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
+          Modèle
+        </button>
+      </nav>
+
+      <div id="model-status">
+        <div id="status-dot"></div>
+        <div id="status-text">Chargement...</div>
+      </div>
+
+      <div id="sidebar-params">
+        <div class="param-group">
+          <label>Température <span id="temp-val">0.8</span></label>
+          <input type="range" id="temperature" min="0.1" max="2.0" step="0.05" value="0.8" />
+        </div>
+        <div class="param-group">
+          <label>Top-P <span id="topp-val">0.95</span></label>
+          <input type="range" id="top_p" min="0.5" max="1.0" step="0.01" value="0.95" />
+        </div>
+        <div class="param-group">
+          <label>Max tokens <span id="maxtok-val">300</span></label>
+          <input type="range" id="max_tokens" min="50" max="1000" step="10" value="300" />
+        </div>
+        <div class="param-group">
+          <label>Stratégie</label>
+          <select id="strategy">
+            <option value="top_p">Nucleus (top-p)</option>
+            <option value="top_k">Top-K</option>
+            <option value="greedy">Greedy</option>
+            <option value="beam">Beam Search</option>
+            <option value="mirostat">Mirostat v2</option>
+          </select>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main panel -->
+    <main id="main">
+
+      <!-- ── CHAT TAB ─────────────────────────────────────────── -->
+      <section id="tab-chat" class="tab-panel active">
+        <div id="chat-header">
+          <h2>Chat NFN</h2>
+          <button id="chat-clear" class="btn-icon" title="Effacer la conversation">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+          </button>
+        </div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-area">
+          <textarea id="chat-input" placeholder="Écris un message…" rows="1"></textarea>
+          <button id="chat-send" class="btn-primary">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- ── CODE TAB ─────────────────────────────────────────── -->
+      <section id="tab-code" class="tab-panel">
+        <div id="code-header">
+          <h2>Éditeur de Code</h2>
+          <select id="code-language">
+            <option value="python">Python</option>
+            <option value="javascript">JavaScript</option>
+            <option value="typescript">TypeScript</option>
+            <option value="rust">Rust</option>
+            <option value="c">C</option>
+            <option value="cpp">C++</option>
+            <option value="go">Go</option>
+            <option value="java">Java</option>
+            <option value="bash">Bash</option>
+          </select>
+          <div id="code-actions">
+            <button id="code-complete" class="btn-sm">Compléter</button>
+            <button id="code-explain" class="btn-sm">Expliquer</button>
+            <button id="code-refactor" class="btn-sm">Refactoriser</button>
+            <button id="code-generate" class="btn-sm btn-primary">Générer</button>
+          </div>
+        </div>
+        <div id="code-layout">
+          <div id="code-left">
+            <div class="panel-label">Code d'entrée</div>
+            <textarea id="code-input" spellcheck="false" placeholder="# Colle ou écris ton code ici…&#10;# Ou décris ce que tu veux générer dans le champ ci-dessous"></textarea>
+            <textarea id="code-instruction" rows="2" placeholder="Instruction / description (optionnel)…"></textarea>
+          </div>
+          <div id="code-right">
+            <div class="panel-label">Résultat NFN</div>
+            <div id="code-output"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── AGENT TAB ─────────────────────────────────────────── -->
+      <section id="tab-agent" class="tab-panel">
+        <div id="agent-header">
+          <h2>Agent de Raisonnement</h2>
+          <button id="agent-clear" class="btn-icon" title="Réinitialiser">
+            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+          </button>
+        </div>
+        <div id="agent-description">
+          <p>L'agent NFN décompose ton objectif en étapes et utilise des outils pour raisonner.</p>
+          <div class="tool-badges">
+            <span class="badge">🧮 calculate(expr)</span>
+            <span class="badge">🔍 search(query)</span>
+            <span class="badge">💭 think(thought)</span>
+            <span class="badge">✅ answer(text)</span>
+          </div>
+        </div>
+        <div id="agent-trace"></div>
+        <div id="agent-input-area">
+          <input type="text" id="agent-goal" placeholder="Objectif: calcule la racine carrée de 1764, cherche NFN, etc." />
+          <input type="number" id="agent-max-steps" value="5" min="1" max="10" style="width:70px" title="Max étapes" />
+          <button id="agent-run" class="btn-primary">Exécuter</button>
+        </div>
+      </section>
+
+      <!-- ── TRAINING TAB ─────────────────────────────────────── -->
+      <section id="tab-train" class="tab-panel">
+        <div id="train-header">
+          <h2>Entraînement BPTP</h2>
+          <div id="train-status-badge"></div>
+        </div>
+        <div id="train-layout">
+          <div id="train-left">
+            <div class="panel-label">Corpus d'entraînement</div>
+            <textarea id="train-text" rows="10" placeholder="Colle ici le texte d'entraînement…&#10;&#10;Exemple: Shakespeare, articles, code source, etc."></textarea>
+            <div class="train-params">
+              <div class="param-row">
+                <label>Époques</label>
+                <input type="number" id="train-epochs" value="3" min="1" max="100" />
+              </div>
+              <div class="param-row">
+                <label>Longueur contexte</label>
+                <input type="number" id="train-seq-len" value="128" min="32" max="512" step="32" />
+              </div>
+              <div class="param-row">
+                <label>Batch size</label>
+                <input type="number" id="train-batch" value="2" min="1" max="32" />
+              </div>
+              <div class="param-row">
+                <label>Learning rate</label>
+                <input type="number" id="train-lr" value="0.0003" step="0.0001" />
+              </div>
+              <div class="param-row">
+                <label>Config modèle</label>
+                <select id="train-config">
+                  <option value="nano">Nano (2M params)</option>
+                  <option value="small">Small (15M params)</option>
+                  <option value="medium">Medium (85M params)</option>
+                </select>
+              </div>
+            </div>
+            <div id="train-buttons">
+              <button id="train-start" class="btn-primary">▶ Démarrer</button>
+              <button id="train-stop" class="btn-danger" disabled>⏹ Arrêter</button>
+              <button id="train-load-sample" class="btn-sm">Charger exemple</button>
+            </div>
+          </div>
+          <div id="train-right">
+            <div class="panel-label">Métriques en direct</div>
+            <canvas id="loss-chart" width="500" height="220"></canvas>
+            <div id="train-metrics">
+              <div class="metric-card">
+                <div class="metric-label">Loss (tâche)</div>
+                <div id="m-loss" class="metric-val">—</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Loss (phase)</div>
+                <div id="m-phase" class="metric-val">—</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Étape</div>
+                <div id="m-step" class="metric-val">0</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">LR actuel</div>
+                <div id="m-lr" class="metric-val">—</div>
+              </div>
+            </div>
+            <div id="train-log"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── INFO TAB ─────────────────────────────────────────── -->
+      <section id="tab-info" class="tab-panel">
+        <div id="info-header">
+          <h2>Modèle NFN</h2>
+          <div id="info-actions">
+            <button id="info-save" class="btn-sm">💾 Sauvegarder</button>
+            <button id="info-reload" class="btn-sm">🔄 Recharger</button>
+          </div>
+        </div>
+        <div id="info-layout">
+          <div id="model-card">
+            <h3>Architecture</h3>
+            <div id="model-params-grid"></div>
+          </div>
+          <div id="fractal-viz">
+            <h3>Topologie Fractale</h3>
+            <canvas id="fractal-canvas" width="460" height="320"></canvas>
+            <div id="viz-controls">
+              <button class="viz-btn active" data-motif="binary_tree">Arbre Binaire</button>
+              <button class="viz-btn" data-motif="cantor">Cantor</button>
+              <button class="viz-btn" data-motif="sierpinski">Sierpinski</button>
+            </div>
+          </div>
+          <div id="phase-viz">
+            <h3>Oscillations de Phase</h3>
+            <canvas id="phase-canvas" width="460" height="200"></canvas>
+          </div>
+          <div id="load-model-panel">
+            <h3>Charger un checkpoint</h3>
+            <input type="text" id="ckpt-path" placeholder="checkpoints/nfn_final.pt" />
+            <button id="ckpt-load-btn" class="btn-primary">Charger</button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

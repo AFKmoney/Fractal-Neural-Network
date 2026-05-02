@@ -1,0 +1,21 @@
+{
+  "d_model": 128,
+  "d_ff": 512,
+  "n_levels": 3,
+  "branching": 2,
+  "motifs": ["binary_tree", "cantor"],
+  "n_blocks": 2,
+  "n_heads": 4,
+  "rank": 4,
+  "n_time_steps": 4,
+  "max_seq_len": 256,
+  "dropout": 0.1,
+  "omega_base": 1.0,
+  "lambda_scale": 2.0,
+  "damping": true,
+  "gamma_init": 0.1,
+  "alpha": 0.9,
+  "lambda_phase": 0.01,
+  "lambda_freq": 0.001,
+  "lambda_spectral": 0.0001
+}
