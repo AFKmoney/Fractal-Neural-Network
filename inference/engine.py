@@ -163,17 +163,26 @@ class NFNInferenceEngine:
                 yield tok_id
             return
 
-        for _ in range(max_new_tokens):
-            ctx = generated[:, -self.cfg.max_seq_len:]
-            logits, _ = self.model(ctx)
-            logits = logits[:, -1, :]  # [1, V]
+        # Prefill: run the prompt through the model to populate KV-cache
+        from nfn.kv_cache import NFNKVCache
+        kv_cache = NFNKVCache(
+            n_blocks=self.cfg.n_blocks,
+            n_levels=self.cfg.n_levels,
+            branching=self.cfg.branching,
+            d_model=self.cfg.d_model,
+        )
+        # Prefill pass
+        with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16,
+                            enabled=self.device.type == "cuda"):
+            logits, _ = self.model(generated, kv_cache=kv_cache)
+        logits = logits[:, -1, :]
 
+        for step_i in range(max_new_tokens):
             if strategy == "greedy":
                 next_id = logits.argmax(dim=-1).item()
             elif strategy == "mirostat":
                 next_id, mu = mirostat_v2(logits, mirostat_tau, mirostat_eta, mu)
             else:
-                # temperature + top_k + top_p
                 logits = logits / max(temperature, 1e-6)
                 if top_k > 0:
                     logits = top_k_filter(logits, top_k)
@@ -187,10 +196,12 @@ class NFNInferenceEngine:
             if next_id == self.cfg.eos_token_id:
                 break
 
-            generated = torch.cat([
-                generated,
-                torch.tensor([[next_id]], device=self.device)
-            ], dim=1)
+            # Decode step: single new token through cached model
+            next_tensor = torch.tensor([[next_id]], device=self.device)
+            with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16,
+                                enabled=self.device.type == "cuda"):
+                logits, _ = self.model(next_tensor, kv_cache=kv_cache)
+            logits = logits[:, -1, :]
 
     # ── Text-level interface ──────────────────────────────────────────────────
 

@@ -11,7 +11,9 @@ Endpoints:
   POST /api/train/stop      → stop training
   GET  /api/train/status    → training metrics
   POST /api/load_model      → load checkpoint
-  POST /api/save_model      → save checkpoint
+  POST /api/save_model      → save checkpoint + memory state
+  POST /api/memory/reset    → reset persistent working memory
+  GET  /api/memory/state    → inspect current memory state
   WS   /ws/stream           → streaming generation (WebSocket)
   WS   /ws/train            → live training metrics (WebSocket)
   POST /api/agent/run       → run reasoning agent step
@@ -45,7 +47,7 @@ from training.trainer import NFNTrainer
 from interface.agents import ChatAgent, CodeAgent, ReasoningAgent
 
 
-app = FastAPI(title="Neural Fractal Network", version="1.0.0")
+app = FastAPI(title="Neural Fractal Network", version="2.0.0")
 
 # ── Static files ──────────────────────────────────────────────────────────────
 STATIC_DIR = Path(__file__).parent / "static"
@@ -329,12 +331,50 @@ async def save_model():
         return JSONResponse(status_code=503, content={"error": "No model"})
     path = ROOT / "checkpoints" / "nfn_manual_save.pt"
     path.parent.mkdir(exist_ok=True)
+    # Save model weights + memory state
+    mem_states = None
+    if hasattr(state.model, "save_memory"):
+        mem_states = [
+            s.cpu().tolist() if s is not None else None
+            for s in state.model.save_memory()
+        ]
     torch.save({
         "model_state": state.model.state_dict(),
         "cfg": state.model.cfg.to_dict(),
         "step": getattr(state.trainer, "step", 0),
+        "memory_states": mem_states,
     }, path)
     return {"path": str(path)}
+
+
+@app.post("/api/memory/reset")
+async def memory_reset():
+    """Reset persistent working memory to initial state."""
+    if state.model is None:
+        return JSONResponse(status_code=503, content={"error": "No model"})
+    if hasattr(state.model, "reset_memory"):
+        state.model.reset_memory()
+        return {"status": "ok", "message": "Memory reset"}
+    return {"status": "noop", "message": "Model has no persistent memory"}
+
+
+@app.get("/api/memory/state")
+async def memory_state():
+    """Return summary of current memory state."""
+    if state.model is None:
+        return JSONResponse(status_code=503, content={"error": "No model"})
+    if not hasattr(state.model, "save_memory"):
+        return {"has_memory": False}
+    states = state.model.save_memory()
+    summary = []
+    for i, s in enumerate(states):
+        if s is not None:
+            summary.append({
+                "level": i,
+                "shape": list(s.shape),
+                "norm": float(s.norm().item()),
+            })
+    return {"has_memory": True, "banks": summary}
 
 
 @app.post("/api/agent/run")

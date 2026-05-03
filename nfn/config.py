@@ -5,44 +5,62 @@ from typing import List
 @dataclass
 class NFNConfig:
     # ── Vocabulary ────────────────────────────────────────────────────────────
-    vocab_size: int = 512           # character-level default
+    vocab_size: int = 512           # overridden by tokenizer at build time
     pad_token_id: int = 0
     bos_token_id: int = 1
     eos_token_id: int = 2
 
     # ── Model dimensions ──────────────────────────────────────────────────────
-    d_model: int = 256              # hidden dimension d
-    d_ff: int = 1024                # feed-forward inner dimension
-    n_blocks: int = 4               # stacked NFN blocks (≈ depth)
+    d_model: int = 256
+    d_ff: int = 1024
+    n_blocks: int = 4
     dropout: float = 0.1
 
     # ── Fractal topology ──────────────────────────────────────────────────────
-    n_levels: int = 4               # fractal depth K (levels above leaf)
+    n_levels: int = 4               # fractal depth K
     branching: int = 2              # branching factor b
     motifs: List[str] = field(
         default_factory=lambda: ["binary_tree", "cantor"]
-    )                               # fractal patterns to superpose
+    )
 
     # ── Sinusoidal connections ─────────────────────────────────────────────────
-    rank: int = 8                   # R for low-rank sinusoidal factorisation
-    omega_base: float = 1.0         # ω₀ — base frequency
-    lambda_scale: float = 2.0       # λ — inter-level scale ratio
-    damping: bool = True            # use amortised sinusoids (exp decay)
-    gamma_init: float = 0.1         # initial damping rate γ
+    rank: int = 8
+    omega_base: float = 10_000.0    # matches RoPE base for coherence
+    lambda_scale: float = 2.0
+    damping: bool = True
+    gamma_init: float = 0.1
 
-    # ── Temporal (phase) dynamics ─────────────────────────────────────────────
-    n_time_steps: int = 8           # P discrete time steps
-    alpha: float = 0.9              # state decay α
-    phase_coupling: float = 0.1     # strength of inter-node phase coupling
+    # ── RoPE (long context) ───────────────────────────────────────────────────
+    use_rope: bool = True
+    rope_base: float = 10_000.0
+    rope_scale_factor: float = 1.0  # > 1 enables NTK long-context extension
+    max_seq_len: int = 4096         # training context window
+    context_len: int = 32768        # inference context via NTK scaling
 
-    # ── Top-level attention ───────────────────────────────────────────────────
-    n_heads: int = 4                # attention heads on compressed sequence
-    max_seq_len: int = 512          # L — context window
+    # ── Flash Attention ───────────────────────────────────────────────────────
+    use_flash_attn: bool = True     # uses torch SDPA (auto Flash when on GPU)
+    n_heads: int = 4
+
+    # ── Kuramoto ODE phase dynamics ───────────────────────────────────────────
+    use_kuramoto: bool = True
+    kuramoto_rank: int = 8          # low-rank coupling matrix rank
+    kuramoto_steps: int = 4         # RK4 integration steps
+    kuramoto_n_max: int = 512       # max oscillators per level
+
+    # ── Persistent working memory ─────────────────────────────────────────────
+    use_memory: bool = True
+    memory_slots: int = 64          # M memory slots
+    memory_heads: int = 4
+    memory_per_level: bool = True   # FractalMemoryBank vs single bank
+
+    # ── Temporal dynamics ─────────────────────────────────────────────────────
+    n_time_steps: int = 4           # P temporal integration steps
+    alpha: float = 0.9              # state decay
 
     # ── Loss weights ──────────────────────────────────────────────────────────
-    lambda_phase: float = 0.01      # phase smoothness
-    lambda_freq: float = 0.001      # frequency sparsity
-    lambda_spectral: float = 0.0001 # Jacobian stability
+    lambda_phase: float = 0.01
+    lambda_freq: float = 0.001
+    lambda_spectral: float = 0.0001
 
     # ── Generation ────────────────────────────────────────────────────────────
     temperature: float = 0.8
@@ -55,7 +73,6 @@ class NFNConfig:
 
     @property
     def top_len(self) -> int:
-        """Length of the compressed sequence at the top level."""
         return max(1, self.max_seq_len // (self.branching ** self.n_levels))
 
     def to_dict(self) -> dict:
@@ -64,4 +81,5 @@ class NFNConfig:
 
     @classmethod
     def from_dict(cls, d: dict) -> "NFNConfig":
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        valid = {k for k in cls.__dataclass_fields__}
+        return cls(**{k: v for k, v in d.items() if k in valid})
