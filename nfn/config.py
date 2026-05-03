@@ -81,6 +81,11 @@ class NFNConfig:
     nfmc_hopfield_n: int = 256       # number of Hopfield analytic patterns
     nfmc_zipf_alpha: float = 1.0     # Zipf exponent for decoder initialization
 
+    # ── EfficientNFN v3.2 — MoE + Linear Attention ────────────────────────
+    moe_n_experts: int = 8           # total number of MoE experts
+    moe_top_k: int = 2               # experts activated per token (sparse)
+    moe_d_ff_per_expert: int = 256   # FFN width inside each expert
+
     @property
     def n_motifs(self) -> int:
         return len(self.motifs)
