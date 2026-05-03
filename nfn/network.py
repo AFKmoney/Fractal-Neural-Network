@@ -1,5 +1,5 @@
 """
-Neural Fractal Network — Language Model (v2.0)
+Neural Fractal Network — Language Model (v2.0 / v3.0 hybrid)
 
 Full architecture per NFNBlock:
   1. Working memory READ     (FractalMemoryBank / WorkingMemory)
@@ -7,6 +7,7 @@ Full architecture per NFNBlock:
   3. Kuramoto ODE phases     (KuramotoPhaseLayer at each level)
   4. Inter-motif coupling    (InterMotifCoupler)
   5. Flash self-attention    (CausalSelfAttention w/ RoPE + KV-cache)  ← top level
+  5b. NFMC kernel layer      (NFMCKernelLayer — optional, cfg.use_nfmc)  ← v3.0
   6. Working memory WRITE    (update memory with current context)
   7. Top-down fractal        (SinusoidalBroadcast × K)
   8. Motif mix + residual
@@ -16,6 +17,8 @@ NFNLanguageModel:
   TokenEmbedding (no positional embed — RoPE handles positions)
   → NFNBlock × n_blocks
   → LayerNorm → LMHead (weight-tied with embedding)
+
+Standalone v3.0 model: see nfn/nfmc.py → NFMCLanguageModel
 """
 
 import math
@@ -31,6 +34,7 @@ from .rope import RoPECache
 from .kv_cache import AttentionKVCache, NFNKVCache
 from .phase_ode import KuramotoPhaseLayer
 from .memory import WorkingMemory, FractalMemoryBank
+from .condensate import NFMCKernelLayer
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -259,6 +263,19 @@ class NFNBlock(nn.Module):
                 dropout=cfg.dropout,
             )
 
+        # NFMC kernel layer (v3.0 — optional fractal kernel enrichment)
+        self.nfmc: Optional[NFMCKernelLayer] = None
+        if cfg.use_nfmc:
+            self.nfmc = NFMCKernelLayer(
+                d_model    = cfg.d_model,
+                n_rff      = cfg.nfmc_n_rff,
+                n_scales   = cfg.nfmc_n_scales,
+                rank       = cfg.nfmc_rank,
+                n_phases   = cfg.nfmc_n_phases,
+                n_iter     = cfg.nfmc_lock_iter,
+                eta        = cfg.nfmc_eta,
+            )
+
         # Motif mix
         if cfg.n_motifs > 1:
             self.motif_mix = nn.Linear(cfg.d_model * cfg.n_motifs, cfg.d_model)
@@ -334,6 +351,10 @@ class NFNBlock(nn.Module):
         min_top = min(lvls[-1].shape[1] for lvls in all_levels)
         top = torch.stack([lvls[-1][:, :min_top] for lvls in all_levels], dim=0).mean(0)
         top = top + self.top_attn(self.top_norm(top), kv_cache=kv_cache, kv_offset=kv_offset)
+
+        # ── NFMC kernel enrichment (v3.0 — optional) ──────────────────────────
+        if self.nfmc is not None:
+            top = self.nfmc(top)
 
         # Inject updated top back (no in-place)
         for m_idx in range(len(self.branches)):

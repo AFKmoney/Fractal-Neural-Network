@@ -67,6 +67,16 @@ class NFNConfig:
     top_k: int = 50
     top_p: float = 0.95
 
+    # ── NFMC v3.0 — Condensed Multidimensional Fractal Kernel ─────────────────
+    use_nfmc: bool = False           # enable NFMC kernel layer in NFNBlocks
+    nfmc_n_rff: int = 256            # random fractal Fourier features (per block)
+    nfmc_n_scales: int = 8           # octave bands in frequency lattice
+    nfmc_rank: int = 64              # condensate rank r
+    nfmc_n_phases: int = 8           # phase oscillators per token
+    nfmc_lock_iter: int = 8          # Helmholtz phase-locking gradient steps
+    nfmc_eta: float = 0.15           # phase-locking step size
+    nfmc_lambda_phase: float = 0.005 # weight of phase coherence loss
+
     @property
     def n_motifs(self) -> int:
         return len(self.motifs)

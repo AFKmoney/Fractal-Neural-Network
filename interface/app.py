@@ -12,6 +12,7 @@ Endpoints:
   GET  /api/train/status    → training metrics
   POST /api/load_model      → load checkpoint
   POST /api/save_model      → save checkpoint + memory state
+  POST /api/condense        → one-shot NFMC condensation (no training)
   POST /api/memory/reset    → reset persistent working memory
   GET  /api/memory/state    → inspect current memory state
   WS   /ws/stream           → streaming generation (WebSocket)
@@ -41,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 
 from nfn.config import NFNConfig
 from nfn.network import NFNLanguageModel
+from nfn.nfmc import NFMCLanguageModel
 from nfn.tokenizer import NFNTokenizer, load_tokenizer
 from inference.engine import NFNInferenceEngine
 from training.trainer import NFNTrainer
@@ -345,6 +347,43 @@ async def save_model():
         "memory_states": mem_states,
     }, path)
     return {"path": str(path)}
+
+
+@app.post("/api/condense")
+async def condense_model(req: dict = {}):
+    """
+    One-shot NFMC condensation from a text corpus (no SGD).
+    Body: {"text": "...", "max_tokens": 100000}
+    """
+    if state.model is None:
+        return JSONResponse(status_code=503, content={"error": "No model"})
+    if not isinstance(state.model, (NFMCLanguageModel,)) and not hasattr(state.model, 'blocks'):
+        return JSONResponse(status_code=400, content={"error": "Model does not support condensation"})
+    text = req.get("text", "")
+    max_tokens = req.get("max_tokens", 100_000)
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "text is required"})
+
+    import threading
+    def run():
+        try:
+            if isinstance(state.model, NFMCLanguageModel):
+                state.model.condense_from_text(text, state.tokenizer, max_tokens)
+                state.model.condense_vocabulary(text, state.tokenizer, max_tokens)
+            # For hybrid NFNLanguageModel with use_nfmc, condense each block's NFMC layer
+            elif hasattr(state.model, 'blocks'):
+                import torch
+                ids = state.tokenizer.encode(text[:max_tokens])
+                ids_t = torch.tensor(ids, device=state.device).unsqueeze(0)
+                with torch.no_grad():
+                    emb = state.model.embed(ids_t).squeeze(0)
+                for block in state.model.blocks:
+                    if hasattr(block, 'nfmc') and block.nfmc is not None:
+                        block.nfmc.condense_from_hidden(emb)
+        except Exception as e:
+            print(f"Condensation error: {e}")
+    threading.Thread(target=run, daemon=True).start()
+    return {"status": "condensation_started", "max_tokens": max_tokens}
 
 
 @app.post("/api/memory/reset")
