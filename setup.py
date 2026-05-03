@@ -2,8 +2,8 @@ from setuptools import setup, find_packages
 
 setup(
     name="nfn",
-    version="1.0.0",
-    description="Neural Fractal Network – Fractal topology with sinusoidal parametric coupling",
+    version="3.2.0",
+    description="Neural Fractal Network – Architecture de Super-Intelligence Légère par Noyau Fractal Multidimensionnel Condensé",
     author="Philippe-Antoine Robert",
     packages=find_packages(),
     python_requires=">=3.10",
