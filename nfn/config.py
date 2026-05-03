@@ -69,13 +69,17 @@ class NFNConfig:
 
     # ── NFMC v3.0 — Condensed Multidimensional Fractal Kernel ─────────────────
     use_nfmc: bool = False           # enable NFMC kernel layer in NFNBlocks
-    nfmc_n_rff: int = 256            # random fractal Fourier features (per block)
+    nfmc_n_rff: int = 256            # random fractal Fourier features
     nfmc_n_scales: int = 8           # octave bands in frequency lattice
     nfmc_rank: int = 64              # condensate rank r
     nfmc_n_phases: int = 8           # phase oscillators per token
     nfmc_lock_iter: int = 8          # Helmholtz phase-locking gradient steps
     nfmc_eta: float = 0.15           # phase-locking step size
     nfmc_lambda_phase: float = 0.005 # weight of phase coherence loss
+
+    # ── NFMC v3.1 — ZeroShotNFMC (Mandelbrot + Hopfield + Zipf) ─────────────
+    nfmc_hopfield_n: int = 256       # number of Hopfield analytic patterns
+    nfmc_zipf_alpha: float = 1.0     # Zipf exponent for decoder initialization
 
     @property
     def n_motifs(self) -> int:
