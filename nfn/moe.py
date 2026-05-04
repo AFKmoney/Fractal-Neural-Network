@@ -174,20 +174,35 @@ class PhaseRoutedMoE(nn.Module):
         topk_vals = topk_vals / topk_vals.sum(dim=-1, keepdim=True) # renorm
 
         # Compute expert outputs (only for activated experts)
-        out = torch.zeros_like(x)
-        for k_slot in range(self.K):
-            expert_ids = topk_idx[..., k_slot]  # [B, L]
-            gates      = topk_vals[..., k_slot] # [B, L]
+        # Flatten spatial dims to simplify indexing
+        x_flat = x.view(-1, d)
 
-            # Batch over unique expert IDs
-            for e_id in range(self.E):
-                mask = (expert_ids == e_id)      # [B, L] bool
-                if not mask.any():
-                    continue
-                x_e = x[mask]                   # [n_active, d]
-                y_e = self.experts[e_id](x_e)   # [n_active, d]
-                out[mask] += gates[mask].unsqueeze(-1) * y_e
+        # Flatten topk indices and values
+        topk_idx_flat = topk_idx.view(-1, self.K)
+        topk_vals_flat = topk_vals.view(-1, self.K)
 
+        out_flat = torch.zeros_like(x_flat)
+
+        for e_id in range(self.E):
+            # Find tokens assigned to this expert in any slot
+            mask_flat = (topk_idx_flat == e_id) # [B*L, K]
+
+            # Since K-slots are distinct for a given token (topk without replacement),
+            # any token will have at most one True in its mask_flat row.
+            token_mask = mask_flat.any(dim=-1) # [B*L]
+
+            if not token_mask.any():
+                continue
+
+            x_e = x_flat[token_mask] # [n_active, d]
+            y_e = self.experts[e_id](x_e) # [n_active, d]
+
+            # Extract gates. Since there is at most one True per row, we can just mask
+            gates_e = topk_vals_flat[mask_flat] # [n_active]
+
+            out_flat[token_mask] += gates_e.unsqueeze(-1) * y_e
+
+        out = out_flat.view(B, L, d)
         return self.norm(x + out)
 
     def load_balance_loss(self, x: torch.Tensor) -> torch.Tensor:
