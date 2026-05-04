@@ -198,11 +198,19 @@ class EfficientNFNLanguageModel(nn.Module):
         self.eval()
         device = next(self.parameters()).device
         ids = tokenizer.encode(text)[:max_tokens] if tokenizer else [ord(c) % self.cfg.vocab_size for c in text[:max_tokens]]
+        if not ids:
+            return
+
+        # Convert all to a single tensor first
+        ids_tensor = torch.tensor(ids, device=device)
         chunk, phi_chunks = 4096, []
-        for i in range(0, len(ids), chunk):
-            t = torch.tensor(ids[i:i+chunk], device=device).unsqueeze(0)
+
+        # Slicing a tensor is virtually free compared to creating a tensor from a python list slice repeatedly
+        for i in range(0, len(ids_tensor), chunk):
+            t = ids_tensor[i:i+chunk].unsqueeze(0)
             e = self.embed(t).squeeze(0)
             phi_chunks.append(self.rff(e))
+
         phi_all = torch.cat(phi_chunks, dim=0)
         self.condensate.condense(phi_all)
         self._condensed = True
