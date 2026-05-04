@@ -282,21 +282,18 @@ class FractalLinearAttention(nn.Module):
         # kv_sum[i] = Σ_{j≤i} k[j]ᵀ v[j]  ∈ R^{d×d}
         # out[i] = q[i] · kv_sum[i] / (q[i] · k_sum[i])
 
-        B, H, L, d = q.shape
-        out_list = []
-        kv_sum = torch.zeros(B, H, d, v.shape[-1], device=q.device, dtype=q.dtype)
-        k_sum  = torch.zeros(B, H, d, device=q.device, dtype=q.dtype)
+        # Vectorized implementation using cumulative sums
+        # O(L·d²) complexity, fully parallel across sequence dimension
+        kv = k.unsqueeze(-1) * v.unsqueeze(-2)     # [B, H, L, d, d_v]
+        kv_sums = torch.cumsum(kv, dim=2)          # [B, H, L, d, d_v]
+        k_sums = torch.cumsum(k, dim=2)            # [B, H, L, d]
 
-        for i in range(L):
-            kv_sum = kv_sum + k[:, :, i, :].unsqueeze(-1) * v[:, :, i, :].unsqueeze(-2)
-            k_sum  = k_sum  + k[:, :, i, :]
+        # num[i] = q[i] @ Σ_{j≤i} k[j]ᵀv[j]
+        num = torch.einsum("bhld,bhldv->bhlv", q, kv_sums)
+        # denom[i] = q[i] · Σ_{j≤i} k[j]
+        denom = torch.einsum("bhld,bhld->bhl", q, k_sums).unsqueeze(-1).clamp(min=1e-6)
 
-            # out_i = q_i @ kv_sum / (q_i @ k_sum)
-            num   = (q[:, :, i, :].unsqueeze(-2) @ kv_sum).squeeze(-2)  # [B, H, d]
-            denom = (q[:, :, i, :] * k_sum).sum(dim=-1, keepdim=True).clamp(min=1e-6)
-            out_list.append(num / denom)
-
-        return torch.stack(out_list, dim=2)   # [B, H, L, d]
+        return num / denom
 
     def forward(
         self,
