@@ -31,8 +31,7 @@ EfficientNFNLanguageModel:
 This is the "from 2099" model: not bigger GPUs — smarter architecture.
 """
 
-import math
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -43,7 +42,6 @@ from .moe import PhaseRoutedMoE, FractalLinearAttention, PhaseSoliton
 from .analytic_embed import AnalyticTokenEmbedding
 from .hopfield import ZipfianDecoder, mandelbrot_frequencies
 from .condensate import FractalRFF, SpectralCondensate, HelmholtzPhaseLocking
-from .rope import RoPECache
 
 
 # ─────────────────────────────────────────────────────────────────────────────
