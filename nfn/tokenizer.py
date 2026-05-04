@@ -21,28 +21,45 @@ import re
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
+# Precompile byte token pattern for efficient decoding
+BYTE_PATTERN = re.compile(r"<0x([0-9A-Fa-f]{2})>")
+
 
 # ── Special tokens ────────────────────────────────────────────────────────────
-PAD     = "<pad>"
-BOS     = "<bos>"
-EOS     = "<eos>"
-UNK     = "<unk>"
-SEP     = "<sep>"
-SYS     = "<sys>"
-USR     = "<usr>"
-AST     = "<ast>"
-CODE    = "<code>"
+PAD = "<pad>"
+BOS = "<bos>"
+EOS = "<eos>"
+UNK = "<unk>"
+SEP = "<sep>"
+SYS = "<sys>"
+USR = "<usr>"
+AST = "<ast>"
+CODE = "<code>"
 ENDCODE = "</code>"
-THINK   = "<think>"
-ENDTHINK= "</think>"
+THINK = "<think>"
+ENDTHINK = "</think>"
 
-SPECIAL_TOKENS = [PAD, BOS, EOS, UNK, SEP, SYS, USR, AST, CODE, ENDCODE, THINK, ENDTHINK]
+SPECIAL_TOKENS = [
+    PAD,
+    BOS,
+    EOS,
+    UNK,
+    SEP,
+    SYS,
+    USR,
+    AST,
+    CODE,
+    ENDCODE,
+    THINK,
+    ENDTHINK,
+]
 N_SPECIAL = len(SPECIAL_TOKENS)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tier 1: Tiktoken wrapper (100K vocab, best quality)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TiktokenTokenizer:
     """
@@ -53,6 +70,7 @@ class TiktokenTokenizer:
     def __init__(self):
         try:
             import tiktoken
+
             self._enc = tiktoken.get_encoding("cl100k_base")
             self._ok = True
         except ImportError:
@@ -73,13 +91,20 @@ class TiktokenTokenizer:
         return self._enc.n_vocab + N_SPECIAL if self._ok else 0
 
     @property
-    def pad_token_id(self) -> int:  return self._special_to_id[PAD]
+    def pad_token_id(self) -> int:
+        return self._special_to_id[PAD]
+
     @property
-    def bos_token_id(self) -> int:  return self._special_to_id[BOS]
+    def bos_token_id(self) -> int:
+        return self._special_to_id[BOS]
+
     @property
-    def eos_token_id(self) -> int:  return self._special_to_id[EOS]
+    def eos_token_id(self) -> int:
+        return self._special_to_id[EOS]
+
     @property
-    def unk_token_id(self) -> int:  return self._special_to_id[UNK]
+    def unk_token_id(self) -> int:
+        return self._special_to_id[UNK]
 
     def encode(
         self,
@@ -148,6 +173,7 @@ class TiktokenTokenizer:
 # Tier 2: Pure-Python BPE tokenizer (no external deps)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class BPETokenizer:
     """
     Minimal byte-pair encoding tokenizer.
@@ -192,7 +218,7 @@ class BPETokenizer:
         n_merges = max(0, n_merges)
 
         # Build word frequency table
-        words = re.findall(r'\w+|[^\w\s]|\s+', text)
+        words = re.findall(r"\w+|[^\w\s]|\s+", text)
         word_freq: Counter = Counter(words)
 
         # Represent each word as tuple of char-tokens
@@ -257,13 +283,20 @@ class BPETokenizer:
         return len(self.vocab)
 
     @property
-    def pad_token_id(self) -> int:  return self.vocab[PAD]
+    def pad_token_id(self) -> int:
+        return self.vocab[PAD]
+
     @property
-    def bos_token_id(self) -> int:  return self.vocab[BOS]
+    def bos_token_id(self) -> int:
+        return self.vocab[BOS]
+
     @property
-    def eos_token_id(self) -> int:  return self.vocab[EOS]
+    def eos_token_id(self) -> int:
+        return self.vocab[EOS]
+
     @property
-    def unk_token_id(self) -> int:  return self.vocab[UNK]
+    def unk_token_id(self) -> int:
+        return self.vocab[UNK]
 
     def encode(
         self,
@@ -284,7 +317,7 @@ class BPETokenizer:
             if part in self.vocab and part in SPECIAL_TOKENS:
                 ids.append(self.vocab[part])
             else:
-                words = re.findall(r'\w+|[^\w\s]|\s+', part)
+                words = re.findall(r"\w+|[^\w\s]|\s+", part)
                 for word in words:
                     chars = self._word_to_chars(word)
                     if self._trained:
@@ -307,21 +340,27 @@ class BPETokenizer:
         text = "".join(tokens)
         text = text.replace("</w>", " ")
         # Decode byte tokens
-        for b in range(256):
+        def _replace_byte(m):
+            b = int(m.group(1), 16)
             if 32 <= b < 127:
-                continue
-            text = text.replace(f"<0x{b:02X}>", chr(b))
+                return m.group(0)
+            return chr(b)
+        text = BYTE_PATTERN.sub(_replace_byte, text)
         return text
 
     def save(self, path: str):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({
-                "type": "bpe",
-                "vocab": self.vocab,
-                "merges": self.merges,
-                "target_vocab_size": self.target_vocab_size,
-            }, f, ensure_ascii=False)
+            json.dump(
+                {
+                    "type": "bpe",
+                    "vocab": self.vocab,
+                    "merges": self.merges,
+                    "target_vocab_size": self.target_vocab_size,
+                },
+                f,
+                ensure_ascii=False,
+            )
 
     @classmethod
     def load(cls, path: str) -> "BPETokenizer":
@@ -329,8 +368,9 @@ class BPETokenizer:
             data = json.load(f)
         tok = cls(vocab_size=data.get("target_vocab_size", 32_000))
         tok.vocab = data["vocab"]
-        tok.id_to_token = {int(v) if isinstance(v, str) else v: k
-                           for k, v in data["vocab"].items()}
+        tok.id_to_token = {
+            int(v) if isinstance(v, str) else v: k for k, v in data["vocab"].items()
+        }
         tok.merges = [tuple(m) for m in data["merges"]]
         tok._trained = len(tok.merges) > 0
         return tok
@@ -339,6 +379,7 @@ class BPETokenizer:
 # ─────────────────────────────────────────────────────────────────────────────
 # Tier 3: Character-level fallback (always available)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class CharTokenizer:
     """Character-level tokenizer. 108 tokens. Always available."""
@@ -351,18 +392,28 @@ class CharTokenizer:
         self.id2tok: Dict[int, str] = {i: t for t, i in self.tok2id.items()}
 
     @property
-    def vocab_size(self) -> int:   return len(self.tok2id)
-    @property
-    def pad_token_id(self) -> int: return self.tok2id[PAD]
-    @property
-    def bos_token_id(self) -> int: return self.tok2id[BOS]
-    @property
-    def eos_token_id(self) -> int: return self.tok2id[EOS]
-    @property
-    def unk_token_id(self) -> int: return self.tok2id[UNK]
+    def vocab_size(self) -> int:
+        return len(self.tok2id)
 
-    def encode(self, text: str, add_bos=False, add_eos=False,
-               max_length: Optional[int] = None) -> List[int]:
+    @property
+    def pad_token_id(self) -> int:
+        return self.tok2id[PAD]
+
+    @property
+    def bos_token_id(self) -> int:
+        return self.tok2id[BOS]
+
+    @property
+    def eos_token_id(self) -> int:
+        return self.tok2id[EOS]
+
+    @property
+    def unk_token_id(self) -> int:
+        return self.tok2id[UNK]
+
+    def encode(
+        self, text: str, add_bos=False, add_eos=False, max_length: Optional[int] = None
+    ) -> List[int]:
         ids = []
         if add_bos:
             ids.append(self.bos_token_id)
@@ -383,16 +434,19 @@ class CharTokenizer:
             tokens.append(tok)
         return "".join(tokens)
 
-    def batch_encode(self, texts, padding=True, max_length=None,
-                     add_bos=False, add_eos=False):
-        encoded = [self.encode(t, add_bos=add_bos, add_eos=add_eos,
-                               max_length=max_length) for t in texts]
+    def batch_encode(
+        self, texts, padding=True, max_length=None, add_bos=False, add_eos=False
+    ):
+        encoded = [
+            self.encode(t, add_bos=add_bos, add_eos=add_eos, max_length=max_length)
+            for t in texts
+        ]
         if padding:
             max_len = max(len(e) for e in encoded)
             masks = []
             for e in encoded:
                 pad_n = max_len - len(e)
-                masks.append([1]*len(e) + [0]*pad_n)
+                masks.append([1] * len(e) + [0] * pad_n)
                 e += [self.pad_token_id] * pad_n
             return {"input_ids": encoded, "attention_mask": masks}
         return {"input_ids": encoded}
@@ -408,8 +462,9 @@ class CharTokenizer:
             data = json.load(f)
         tok = cls.__new__(cls)
         tok.tok2id = data["tok2id"]
-        tok.id2tok = {int(v) if isinstance(v, str) else v: k
-                      for k, v in data["tok2id"].items()}
+        tok.id2tok = {
+            int(v) if isinstance(v, str) else v: k for k, v in data["tok2id"].items()
+        }
         return tok
 
 
@@ -417,12 +472,12 @@ class CharTokenizer:
 # Auto-select best available tokenizer
 # ─────────────────────────────────────────────────────────────────────────────
 
-NFNTokenizer = CharTokenizer   # backwards compat alias
+NFNTokenizer = CharTokenizer  # backwards compat alias
 
 
 def load_tokenizer(
     path: Optional[str] = None,
-    prefer: str = "auto",   # "tiktoken" | "bpe" | "char" | "auto"
+    prefer: str = "auto",  # "tiktoken" | "bpe" | "char" | "auto"
 ) -> "CharTokenizer | BPETokenizer | TiktokenTokenizer":
     """
     Load a tokenizer from path or create the best available.
@@ -447,6 +502,6 @@ def load_tokenizer(
             return tok
 
     if prefer in ("auto", "bpe"):
-        pass   # untrained BPE — caller should call .train() first
+        pass  # untrained BPE — caller should call .train() first
 
     return CharTokenizer()
