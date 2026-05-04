@@ -216,10 +216,10 @@ flow/
 
 | Document | Language | Description |
 |----------|----------|-------------|
-| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | FR | Complete mathematical formalism for every component |
-| **[docs/API.md](docs/API.md)** | FR | Full Python & HTTP API reference with examples |
-| **[docs/THEORY.md](docs/THEORY.md)** | FR | Theoretical foundations: fractals, Kuramoto, NFMC, Zipf |
-| **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | FR | Full version history v1.0 → v3.2 |
+| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | EN | Complete mathematical formalism for every component |
+| **[docs/API.md](docs/API.md)** | EN | Full Python & HTTP API reference with examples |
+| **[docs/THEORY.md](docs/THEORY.md)** | EN | Theoretical foundations: fractals, Kuramoto, NFMC, Zipf |
+| **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | EN | Full version history v1.0 → v3.2 |
 
 ---
 
