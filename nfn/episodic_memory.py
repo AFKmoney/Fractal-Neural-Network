@@ -14,16 +14,16 @@ Architecture:
   ┌──────────────────────────────────────────────────────┐
   │  Input context  h ∈ [B, L, d]                        │
   │       │                                               │
-  │  ┌────▼──────────────────────────┐                        │
+  │  ┌────▼──────────────────────┐                        │
   │  │  EpisodicStore            │  fast write O(1)/token │
   │  │  key   = FractalRFF(h)    │  fixed-size ring buf   │
   │  │  value = h                │  nearest-neighbour read│
-  │  └────────────┼──────────────┘                        │
+  │  └────────────┬──────────────┘                        │
   │               │  consolidation (async, freq-triggered) │
   │  ┌────────────▼──────────────┐                        │
   │  │  SemanticConsolidator     │  rank-1 SVD update     │
   │  │  condensate U, S, V       │  no SGD                │
-  │  └────────────┼──────────────┘                        │
+  │  └────────────┬──────────────┘                        │
   │               │                                        │
   │  ┌────────────▼──────────────┐                        │
   │  │  MemoryGate               │  α·episodic + β·semantic│

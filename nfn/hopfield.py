@@ -403,3 +403,146 @@ class CausalPhasePredictor(nn.Module):
         if return_phases:
             return h_out, phase_traj
         return h_out, None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BayesianZipfianDecoder — uncertainty-aware LM head
+# ─────────────────────────────────────────────────────────────────────────────
+
+class BayesianZipfianDecoder(nn.Module):
+    """
+    Uncertainty-aware LM head that replaces ZipfianDecoder.
+
+    Uncertainty is derived analytically from the condensate singular values S:
+        σ_k (large) → well-defined direction → low uncertainty
+        σ_k (small) → diffuse direction → high uncertainty
+
+    The logit distribution for each token is modelled as:
+
+        logit(v | h) = W · h  +  b_zipf  +  ε·N(0, σ_decoder²)
+
+    where:
+        σ_decoder²  = diag(W · Σ_condensate · Wᵀ)
+        Σ_condensate = diag(1 - S²)   — complement of condensate certainty
+
+    At inference:
+        • Greedy/top-p: use mean logit (standard)
+        • Uncertainty-weighted: subtract β·σ to penalise uncertain tokens
+        • Beam search: use logit ± σ for optimistic/pessimistic bounds
+
+    This is equivalent to Thompson Sampling in logit space:
+        logit ← logit + σ · ξ,  ξ ~ N(0, 1)
+    which is natural exploration without any external temperature parameter.
+    """
+
+    def __init__(
+        self,
+        in_dim:         int,
+        vocab_size:     int,
+        alpha:          float = 1.0,
+        seed:           int   = 27182,
+        uncertainty_beta: float = 0.1,   # weight of uncertainty penalty
+    ):
+        super().__init__()
+        self.in_dim   = in_dim
+        self.vocab_size = vocab_size
+        self.uncertainty_beta = uncertainty_beta
+
+        # ── Zipf-initialised projection (same as ZipfianDecoder) ──────────
+        V = vocab_size
+        g = torch.Generator()
+        g.manual_seed(seed)
+        W_rand = torch.randn(in_dim, V, generator=g)
+        U, _, Vh = torch.linalg.svd(W_rand, full_matrices=False)
+        k     = torch.arange(1, min(in_dim, V) + 1, dtype=torch.float32)
+        sigma = k ** (-alpha / 2)
+        sigma = sigma / sigma[0]
+        W     = (U * sigma.unsqueeze(0)) @ Vh
+        ranks = torch.arange(1, V + 1, dtype=torch.float32)
+        bias_init = -alpha * torch.log(ranks)
+        bias_init = bias_init - bias_init.mean()
+
+        self.proj = nn.Linear(in_dim, V, bias=True)
+        with torch.no_grad():
+            self.proj.weight.copy_(W.T)
+            self.proj.bias.copy_(bias_init)
+
+        # ── Condensate singular values (updated externally) ───────────────
+        # S: [rank] — set by attach_condensate() from SpectralCondensate.S
+        self.register_buffer("condensate_S", torch.ones(in_dim))
+
+        # ── Uncertainty scale: learnable temperature ───────────────────────
+        self.log_sigma_scale = nn.Parameter(torch.tensor(0.0))
+
+    def attach_condensate(self, S: torch.Tensor):
+        """
+        Update uncertainty prior from condensate singular values.
+        S: [rank]  — normalised singular values in [0, 1].
+        Call after each condensate.condense() or update_online().
+        """
+        r = min(S.shape[0], self.in_dim)
+        with torch.no_grad():
+            self.condensate_S.fill_(1e-4)    # small baseline uncertainty
+            self.condensate_S[:r] = S[:r].clamp(0, 1)
+
+    @property
+    def uncertainty_var(self) -> torch.Tensor:
+        """Per-dimension variance from condensate: 1 - S² ∈ (0, 1]."""
+        return (1.0 - self.condensate_S ** 2).clamp(min=1e-6)   # [in_dim]
+
+    def forward(
+        self,
+        x:           torch.Tensor,              # [..., in_dim]
+        sample_noise: bool = False,             # True → Thompson sampling
+        return_sigma: bool = False,             # True → also return logit σ
+    ) -> torch.Tensor:
+        """
+        Returns logits [..., vocab_size].
+        If sample_noise=True, adds N(0, σ²) to each logit (exploration).
+        """
+        logits = self.proj(x)   # [..., V]
+
+        # Propagate input uncertainty through projection
+        # σ²_logit[v] = Σ_d  W[v,d]² · var_d
+        W = self.proj.weight                          # [V, in_dim]
+        var_d = self.uncertainty_var                  # [in_dim]
+        sigma_sq = (W ** 2 * var_d.unsqueeze(0)).sum(-1)  # [V]
+        sigma = sigma_sq.sqrt() * self.log_sigma_scale.exp()  # [V]
+
+        if sample_noise and self.training:
+            # Thompson sampling: perturb logits by noise proportional to σ
+            noise = torch.randn_like(logits) * sigma
+            logits = logits + noise
+        else:
+            # Deterministic: apply uncertainty penalty (pessimistic inference)
+            logits = logits - self.uncertainty_beta * sigma
+
+        if return_sigma:
+            return logits, sigma
+        return logits
+
+    def expected_entropy(self) -> torch.Tensor:
+        """
+        Expected entropy of the output distribution due to condensate uncertainty.
+        Useful as a diagnostic: high entropy → model is genuinely uncertain.
+        """
+        W   = self.proj.weight          # [V, in_dim]
+        var = self.uncertainty_var      # [in_dim]
+        # Avg logit variance = mean over vocab of Σ_d W[v,d]² · var_d
+        return (W ** 2 * var.unsqueeze(0)).sum(-1).mean().sqrt()
+
+    def loss_calibration(
+        self,
+        logits: torch.Tensor,   # [B, L, V]
+        targets: torch.Tensor,  # [B, L]
+    ) -> torch.Tensor:
+        """
+        NLL loss that also penalises over-confidence (Brier-style regulariser).
+        Encourages calibrated uncertainty — not just minimum perplexity.
+        """
+        nll = F.cross_entropy(logits.reshape(-1, self.vocab_size), targets.reshape(-1))
+        # Entropy regulariser: reward higher entropy on non-target tokens
+        probs = F.softmax(logits, dim=-1)                        # [B, L, V]
+        entropy = -(probs * (probs + 1e-8).log()).sum(-1).mean() # scalar
+        # We want moderate entropy — penalise both extremes lightly
+        return nll + 0.01 * (entropy - math.log(self.vocab_size) * 0.5).abs()
