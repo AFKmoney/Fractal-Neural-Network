@@ -149,6 +149,50 @@ class SpectralCondensate(nn.Module):
         self.S.fill_(1e-8)
         self.S[:r] = S[:r] / (S[0] + 1e-8)
 
+    @torch.no_grad()
+    def update_online(self, features: torch.Tensor, lr: float = 0.3):
+        """
+        Incremental rank-1 SVD update — O(d·r) per call, zero SGD.
+
+        Given a new mini-batch of features X ∈ R^{N×D}, extends the current
+        condensate without forgetting previous knowledge:
+
+            merged = [U·diag(S) | lr·X_centered·V_new]
+            U, S ← truncated_SVD(merged)
+
+        This is the Oja / Brand (2002) incremental SVD algorithm adapted for
+        the fractal condensate. Safe to call every forward pass on small batches.
+        """
+        if features.shape[0] < 2:
+            return
+        features = features.reshape(-1, self.rff_dim)
+        features = features - features.mean(0)
+
+        try:
+            _, S_new, Vh_new = torch.linalg.svd(features, full_matrices=False)
+        except Exception:
+            return
+
+        r_new = min(self.rank, S_new.shape[0])
+        V_new = Vh_new[:r_new].T          # [rff_dim, r_new]
+        s_new = S_new[:r_new] / (S_new[0] + 1e-8)
+
+        # Merge old and new in the joint subspace
+        old_weighted = self.U * self.S.unsqueeze(0)       # [rff_dim, rank]
+        new_weighted = V_new * (lr * s_new).unsqueeze(0)  # [rff_dim, r_new]
+        merged = torch.cat([old_weighted, new_weighted], dim=1)   # [rff_dim, rank+r_new]
+
+        try:
+            _, S_m, Vh_m = torch.linalg.svd(merged, full_matrices=False)
+        except Exception:
+            return
+
+        r_keep = min(self.rank, S_m.shape[0])
+        self.U.zero_()
+        self.U[:, :r_keep] = Vh_m[:r_keep].T
+        self.S.fill_(1e-8)
+        self.S[:r_keep] = S_m[:r_keep] / (S_m[0] + 1e-8)
+
     def forward(self, phi: torch.Tensor) -> torch.Tensor:
         # phi: [..., rff_dim]  →  [..., rank]
         return (phi @ self.U) * self.S
