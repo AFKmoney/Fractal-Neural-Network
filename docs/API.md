@@ -1,27 +1,27 @@
-# NFN — Référence API Complète
+# NFN — Complete API Reference
 
-**Auteur :** Philippe-Antoine Robert
-**Version :** 3.2
-**Date :** 2026-05-03 07:22:48 UTC
+**Author:** Philippe-Antoine Robert
+**Version:** 3.2
+**Date:** 2026-05-03 07:22:48 UTC
 
 ---
 
-## Table des matières
+## Table of Contents
 
-1. [API Python — Configuration](#1-api-python--configuration)
-2. [API Python — Modèles](#2-api-python--modèles)
-3. [API Python — Tokenizer](#3-api-python--tokenizer)
-4. [API Python — Entraînement](#4-api-python--entraînement)
-5. [API Python — Inférence](#5-api-python--inférence)
-6. [API Python — Mémoire](#6-api-python--mémoire)
-7. [API HTTP — Serveur FastAPI](#7-api-http--serveur-fastapi)
+1. [Python API — Configuration](#1-python-api--configuration)
+2. [Python API — Models](#2-python-api--models)
+3. [Python API — Tokenizer](#3-python-api--tokenizer)
+4. [Python API — Training](#4-python-api--training)
+5. [Python API — Inference](#5-python-api--inference)
+6. [Python API — Memory](#6-python-api--memory)
+7. [HTTP API — FastAPI Server](#7-http-api--fastapi-server)
 8. [WebSocket — Streaming](#8-websocket--streaming)
-9. [CLI — Ligne de commande](#9-cli--ligne-de-commande)
-10. [Exemples complets](#10-exemples-complets)
+9. [CLI — Command Line Interface](#9-cli--command-line-interface)
+10. [Complete Examples](#10-complete-examples)
 
 ---
 
-## 1. API Python — Configuration
+## 1. Python API — Configuration
 
 ### `NFNConfig`
 
@@ -55,7 +55,7 @@ cfg.top_len     # L / b^K
 
 ---
 
-## 2. API Python — Modèles
+## 2. Python API — Models
 
 ### `NFNLanguageModel` (v2.0)
 
@@ -92,12 +92,12 @@ info = model.param_summary()
 
 ---
 
-## 3. API Python — Tokenizer
+## 3. Python API — Tokenizer
 
 ```python
 from nfn.tokenizer import load_tokenizer, BPETokenizer
 tok = load_tokenizer(path=None, prefer="auto")  # tiktoken > bpe > char
-ids = tok.encode("Bonjour monde", add_bos=True, add_eos=False, max_length=512)
+ids = tok.encode("Hello world", add_bos=True, add_eos=False, max_length=512)
 text = tok.decode([1, 45, 92, 2], skip_special=True)
 tok.vocab_size  # int
 
@@ -109,7 +109,7 @@ tok2 = BPETokenizer.load("tokenizer.json")
 
 ---
 
-## 4. API Python — Entraînement
+## 4. Python API — Training
 
 ```python
 from training.trainer import NFNTrainer
@@ -134,28 +134,28 @@ launch("train.py", n_gpus=4, extra_args=["--config", "configs/medium.json"])
 
 ---
 
-## 5. API Python — Inférence
+## 5. Python API — Inference
 
 ```python
 from inference.engine import NFNInferenceEngine
 engine = NFNInferenceEngine(model, tokenizer, device=torch.device("cuda"))
 text = engine.generate(
-    prompt="Il était une fois", max_new_tokens=500, temperature=0.8,
+    prompt="Once upon a time", max_new_tokens=500, temperature=0.8,
     top_k=50, top_p=0.95, strategy="top_p",  # greedy|top_p|beam|mirostat
     beam_width=4, mirostat_tau=5.0, mirostat_eta=0.1,
 )
-for token in engine.stream("Bonjour", max_new_tokens=200):
+for token in engine.stream("Hello", max_new_tokens=200):
     print(token, end="", flush=True)
 async def handler():
-    async for token in engine.astream("Bonjour"):
+    async for token in engine.astream("Hello"):
         await ws.send_text(token)
 ppl = engine.perplexity(text, stride=64)
-response = engine.chat(messages=[{"role":"user","content":"Qu'est-ce que NFN ?"}], system="Tu es NFN.")
+response = engine.chat(messages=[{"role":"user","content":"What is NFN?"}], system="You are NFN.")
 ```
 
 ---
 
-## 6. API Python — Mémoire
+## 6. Python API — Memory
 
 ```python
 model.reset_memory(batch_size=1)
@@ -167,25 +167,25 @@ model.load_memory(states)
 
 ---
 
-## 7. API HTTP — Serveur FastAPI
+## 7. HTTP API — FastAPI Server
 
-Lancer : `python run.py --config configs/small.json --port 8000`
+Launch: `python run.py --config configs/small.json --port 8000`
 
-| Endpoint | Méthode | Description |
-|----------|---------|-------------|
-| `/api/status` | GET | État du modèle, nb params, config |
-| `/api/chat` | POST | Chat multi-tours, retourne `{response, tokens_generated, elapsed_ms}` |
-| `/api/generate` | POST | Génération depuis prompt, retourne `{text, tokens}` |
-| `/api/code` | POST | Complétion de code, retourne `{completion}` |
-| `/api/train/start` | POST | Lance l'entraînement en arrière-plan |
-| `/api/train/stop` | POST | Arrête l'entraînement |
-| `/api/train/status` | GET | Métriques en temps réel |
-| `/api/load_model` | POST | Charge un checkpoint |
-| `/api/save_model` | POST | Sauvegarde le modèle |
-| `/api/condense` | POST | Condensation one-shot depuis corpus |
-| `/api/memory/reset` | POST | Remet la mémoire à zéro |
-| `/api/memory/state` | GET | État courant des banques mémoire |
-| `/api/agent/run` | POST | Lancer un agent avec objectif |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/status` | GET | Model status, param count, config |
+| `/api/chat` | POST | Multi-turn chat, returns `{response, tokens_generated, elapsed_ms}` |
+| `/api/generate` | POST | Generation from prompt, returns `{text, tokens}` |
+| `/api/code` | POST | Code completion, returns `{completion}` |
+| `/api/train/start` | POST | Starts training in background |
+| `/api/train/stop` | POST | Stops training |
+| `/api/train/status` | GET | Real-time metrics |
+| `/api/load_model` | POST | Load a checkpoint |
+| `/api/save_model` | POST | Save the model |
+| `/api/condense` | POST | One-shot condensation from corpus |
+| `/api/memory/reset` | POST | Resets memory to zero |
+| `/api/memory/state` | GET | Current state of memory banks |
+| `/api/agent/run` | POST | Run an agent with an objective |
 
 ---
 
@@ -194,7 +194,7 @@ Lancer : `python run.py --config configs/small.json --port 8000`
 ```javascript
 const ws = new WebSocket("ws://localhost:8000/ws/stream");
 ws.send(JSON.stringify({
-  mode: "chat", messages: [{role:"user",content:"Bonjour"}],
+  mode: "chat", messages: [{role:"user",content:"Hello"}],
   max_tokens: 300, temperature: 0.8, strategy: "top_p"
 }));
 ws.onmessage = (e) => {
@@ -206,15 +206,15 @@ ws.onmessage = (e) => {
 
 ---
 
-## 9. CLI — Ligne de commande
+## 9. CLI — Command Line Interface
 
 ```bash
-# Entraînement
+# Training
 python train.py --config configs/small.json --data corpus.txt \
   --epochs 3 --batch 8 --seq_len 512 --lr 3e-4 --warmup 200 \
   --dtype bfloat16 --accumulate 4 --compile --distributed ddp
 
-# Serveur web
+# Web server
 python run.py --config configs/small.json --checkpoint checkpoints/nfn_final.pt --port 8000
 
 # Multi-GPU
@@ -224,9 +224,9 @@ torchrun --nproc_per_node=8 train.py --config configs/large.json --distributed f
 
 ---
 
-## 10. Exemples complets
+## 10. Complete Examples
 
-### Exemple 1 — Pipeline ZeroShot
+### Example 1 — ZeroShot Pipeline
 
 ```python
 from nfn.config import NFNConfig
@@ -257,11 +257,11 @@ for step in range(500):
 
 model.eval()
 with torch.no_grad():
-    out = model.generate(torch.tensor([tok.encode("Bonjour,")]), max_new_tokens=200)
+    out = model.generate(torch.tensor([tok.encode("Hello,")]), max_new_tokens=200)
 print(tok.decode(out[0].tolist()))
 ```
 
-### Exemple 2 — EfficientNFN production
+### Example 2 — EfficientNFN Production
 
 ```python
 from nfn.config import NFNConfig
@@ -282,25 +282,25 @@ trainer = NFNTrainer(model, tok, cfg, lr=2e-4, dtype=torch.bfloat16,
 trainer.train(open("corpus.txt").read(), n_epochs=2, seq_len=2048, batch_size=4)
 ```
 
-### Exemple 3 — Mémoire persistante
+### Example 3 — Persistent Memory
 
 ```python
 engine = NFNInferenceEngine(model, tok)
-rep1 = engine.chat([{"role":"user","content":"Mon prénom est Philippe."}])
+rep1 = engine.chat([{"role":"user","content":"My name is Philippe."}])
 torch.save(model.save_memory(), "session.pt")
 model.load_memory(torch.load("session.pt"))
-rep2 = engine.chat([{"role":"user","content":"Quel est mon prénom ?"}])
-# NFN se souvient : "Philippe"
+rep2 = engine.chat([{"role":"user","content":"What is my name?"}])
+# NFN remembers: "Philippe"
 ```
 
-### Exemple 4 — Streaming WebSocket
+### Example 4 — WebSocket Streaming
 
 ```python
 import asyncio, json, websockets
 async def stream_chat():
     async with websockets.connect("ws://localhost:8000/ws/stream") as ws:
         await ws.send(json.dumps({"mode":"chat",
-            "messages":[{"role":"user","content":"Explique les fractales"}],
+            "messages":[{"role":"user","content":"Explain fractals"}],
             "max_tokens":400,"temperature":0.7}))
         async for raw in ws:
             msg = json.loads(raw)

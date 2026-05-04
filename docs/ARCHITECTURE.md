@@ -1,60 +1,60 @@
-# NFN — Architecture Technique Complète
+# NFN — Complete Technical Architecture
 
-**Auteur :** Philippe-Antoine Robert
-**Version :** 3.2
-**Date :** 2026-05-03 07:22:48 UTC
+**Author:** Philippe-Antoine Robert
+**Version:** 3.2
+**Date:** 2026-05-03 07:22:48 UTC
 
 ---
 
-## Table des matières
+## Table of Contents
 
-1. [Vue d'ensemble](#1-vue-densemble)
-2. [Connexions Sinusoïdales Paramétriques](#2-connexions-sinusoïdales-paramétriques)
-3. [Topologie Fractale](#3-topologie-fractale)
-4. [Dynamique de Phase — ODE de Kuramoto](#4-dynamique-de-phase--ode-de-kuramoto)
-5. [Flash Attention + RoPE Long Contexte](#5-flash-attention--rope-long-contexte)
-6. [KV-Cache Fractal](#6-kv-cache-fractal)
-7. [Mémoire Persistante Inter-Contexte](#7-mémoire-persistante-inter-contexte)
-8. [NFMC v3.0 — Noyau Fractal Condensé](#8-nfmc-v30--noyau-fractal-condensé)
+1. [Overview](#1-overview)
+2. [Parametric Sinusoidal Connections](#2-parametric-sinusoidal-connections)
+3. [Fractal Topology](#3-fractal-topology)
+4. [Phase Dynamics — Kuramoto ODE](#4-phase-dynamics--kuramoto-ode)
+5. [Flash Attention + Long-Context RoPE](#5-flash-attention--long-context-rope)
+6. [Fractal KV-Cache](#6-fractal-kv-cache)
+7. [Persistent Cross-Context Memory](#7-persistent-cross-context-memory)
+8. [NFMC v3.0 — Condensed Fractal Kernel](#8-nfmc-v30--condensed-fractal-kernel)
 9. [v3.1 — ZeroShotNFMC](#9-v31--zeroshotnfmc)
 10. [v3.2 — EfficientNFN](#10-v32--efficientnfn)
-11. [Entraînement BPTP](#11-entraînement-bptp)
-12. [Tokenizer Trois Niveaux](#12-tokenizer-trois-niveaux)
+11. [BPTP Training](#11-bptp-training)
+12. [Three-Tier Tokenizer](#12-three-tier-tokenizer)
 13. [Multi-GPU DDP / FSDP](#13-multi-gpu-ddp--fsdp)
 
 ---
 
-## 1. Vue d'ensemble
+## 1. Overview
 
-Le NFN est un modèle de langage causal dont l'architecture repose sur quatre principes fondamentaux absents des transformers standards :
+NFN is a causal language model whose architecture rests on four fundamental principles absent from standard transformers:
 
-| Principe | Implémentation | Fichier |
-|----------|---------------|---------|
-| Auto-similarité fractale | `MotifBranch` avec `SinusoidalAggregator × K` | `network.py`, `connections.py` |
-| Couplage sinusoïdal paramétrique | `Γ(t) = A·exp(−γt)·sin(ω·t+φ)` appris | `connections.py` |
-| Synchronisation de phase | ODE de Kuramoto différentiable (RK4) | `phase_ode.py` |
-| Connaissance a priori condensée | Noyau fractal multidimensionnel NFMC | `condensate.py`, `nfmc.py` |
+| Principle | Implementation | File |
+|-----------|----------------|------|
+| Fractal self-similarity | `MotifBranch` with `SinusoidalAggregator × K` | `network.py`, `connections.py` |
+| Parametric sinusoidal coupling | `Γ(t) = A·exp(−γt)·sin(ω·t+φ)` learned | `connections.py` |
+| Phase synchronization | Differentiable Kuramoto ODE (RK4) | `phase_ode.py` |
+| Condensed a priori knowledge | NFMC multidimensional fractal kernel | `condensate.py`, `nfmc.py` |
 
 ---
 
-## 2. Connexions Sinusoïdales Paramétriques
+## 2. Parametric Sinusoidal Connections
 
-### Définition
+### Definition
 
-Chaque connexion entre nœuds est une **fonction temporelle apprise** :
+Each connection between nodes is a **learned temporal function**:
 
 ```
 Γ(t) = A · exp(−γt) · sin(ω·t + φ)
 ```
 
-Paramètres appris : `A` (amplitude), `ω` (fréquence), `φ` (phase), `γ` (amortissement).
+Learned parameters: `A` (amplitude), `ω` (frequency), `φ` (phase), `γ` (damping).
 
-### Implémentation — `SinusoidalAggregator`
+### Implementation — `SinusoidalAggregator`
 
 ```python
 # connections.py
 class SinusoidalGate(nn.Module):
-    # A, omega, phi, log_gamma : [out_channels, rank] — appris par SGD
+    # A, omega, phi, log_gamma: [out_channels, rank] — learned via SGD
     def forward(self, t):
         angle = t.view(-1,1,1) * self.omega.view(1,1,-1) + self.phi.unsqueeze(0)
         sin_val = torch.sin(angle)              # [N, out_channels, rank]
@@ -64,64 +64,64 @@ class SinusoidalGate(nn.Module):
         return gate
 ```
 
-### Avantages vs poids scalaires
+### Advantages vs Scalar Weights
 
-- Encode des **relations temporelles** — la connexion est plus forte à certaines fréquences
-- **Amortissement naturel** — les connexions lointaines s'affaiblissent exponentiellement
-- **Gradients stables** — les sinusoïdes ont des dérivées bornées, contrairement à ReLU
-- **Inductive bias** — les fréquences apprises correspondent aux échelles du langage
+- Encodes **temporal relationships** — connections are stronger at certain frequencies.
+- **Natural damping** — distant connections weaken exponentially.
+- **Stable gradients** — sinusoids have bounded derivatives, unlike ReLU.
+- **Inductive bias** — the learned frequencies correspond to the scales of language.
 
 ---
 
-## 3. Topologie Fractale
+## 3. Fractal Topology
 
-### Motifs supportés
+### Supported Motifs
 
-| Motif | Branchement `b` | Structure | Cas d'usage |
-|-------|----------------|-----------|-------------|
-| `binary_tree` | 2 | Hiérarchique binaire | Structure sémantique |
-| `cantor` | 3 | Ensemble de Cantor | Multirésolution |
+| Motif | Branching `b` | Structure | Use Case |
+|-------|---------------|-----------|----------|
+| `binary_tree` | 2 | Binary hierarchical | Semantic structure |
+| `cantor` | 3 | Cantor set | Multiresolution |
 
-### Hiérarchie bottom-up / top-down
+### Bottom-Up / Top-Down Hierarchy
 
 ```
-Niveau K (top) :  L/b^K nœuds   ← Flash Self-Attention ici
-Niveau K-1 :      L/b^(K-1) nœuds
+Level K (top):  L/b^K nodes   ← Flash Self-Attention here
+Level K-1:      L/b^(K-1) nodes
     ...
-Niveau 0 (base) : L nœuds        ← tokens d'entrée
+Level 0 (base): L nodes       ← input tokens
 
-Bottom-up : aggrégation sinusoïdale  (L → L/b → ... → L/b^K)
-Top-down  : diffusion sinusoïdale    (L/b^K → ... → L/b → L)
+Bottom-up: sinusoidal aggregation (L → L/b → ... → L/b^K)
+Top-down: sinusoidal broadcast    (L/b^K → ... → L/b → L)
 ```
 
-### Complexité par bloc NFN
+### Complexity per NFN Block
 
 ```
-Bottom-up :  Σ_{k=0}^{K-1} (L/b^k) · O(d²) = O(L · b/(b-1) · d²) = O(L·d²)
-Attention :  O((L/b^K)² · d)  — contexte réduit au niveau top
-Top-down  :  O(L·d²)  (symétrique)
-Total     :  O(L·d² + (L/b^K)²·d)
+Bottom-up: Σ_{k=0}^{K-1} (L/b^k) · O(d²) = O(L · b/(b-1) · d²) = O(L·d²)
+Attention: O((L/b^K)² · d)  — context reduced at the top level
+Top-down:  O(L·d²)  (symmetric)
+Total:     O(L·d² + (L/b^K)²·d)
 ```
 
-Pour `b=2, K=4, L=4096` : `O(4096·d² + 256²·d)` vs `O(4096²·d)` standard → **16× moins cher**.
+For `b=2, K=4, L=4096`: `O(4096·d² + 256²·d)` vs `O(4096²·d)` standard → **16× cheaper**.
 
 ---
 
-## 4. Dynamique de Phase — ODE de Kuramoto
+## 4. Phase Dynamics — Kuramoto ODE
 
-### Équation du modèle
+### Model Equation
 
 ```
 dθᵢ/dt = Ωᵢ + Σⱼ Kⱼᵢ · sin(θⱼ − θᵢ + φⱼᵢ)
 ```
 
-où :
-- `θᵢ` : phase du nœud i
-- `Ωᵢ` : fréquence naturelle (apprise)
-- `Kⱼᵢ` : matrice de couplage de rang `r` (apprise)
-- `φⱼᵢ` : déphasage (appris)
+where:
+- `θᵢ`: phase of node i
+- `Ωᵢ`: natural frequency (learned)
+- `Kⱼᵢ`: rank `r` coupling matrix (learned)
+- `φⱼᵢ`: phase shift (learned)
 
-### Intégration RK4 différentiable
+### Differentiable RK4 Integration
 
 ```python
 # phase_ode.py
@@ -133,30 +133,30 @@ def rk4_step(f, y, t, dt):
     return y + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
 ```
 
-**Clé** : l'intégration RK4 est entièrement différentiable → les gradients traversent l'ODE via les phases.
+**Key concept**: The RK4 integration is fully differentiable → gradients flow through the ODE via the phases.
 
-### Rôle dans le réseau
+### Role in the Network
 
-Les phases `θ` modulent les représentations cachées :
+Phases `θ` modulate hidden representations:
 
 ```
 h_out = h + α · tanh(W_phase · [cos(θ), sin(θ)])
 ```
 
-Les nœuds qui se synchronisent (`θᵢ ≈ θⱼ`) forment des **clusters conceptuels** — c'est le mécanisme du binding temporel.
+Nodes that synchronize (`θᵢ ≈ θⱼ`) form **conceptual clusters** — this is the mechanism of temporal binding.
 
 ---
 
-## 5. Flash Attention + RoPE Long Contexte
+## 5. Flash Attention + Long-Context RoPE
 
 ### Flash Attention
 
-Utilise `torch.nn.functional.scaled_dot_product_attention` (PyTorch 2.0+) :
-- Algorithme IO-aware (Dao et al., 2022)
-- Pas de matrice d'attention en mémoire : O(L) mémoire, O(L²) FLOPs
-- `is_causal=True` pour l'entraînement, `False` avec KV-cache
+Uses `torch.nn.functional.scaled_dot_product_attention` (PyTorch 2.0+):
+- IO-aware algorithm (Dao et al., 2022).
+- No attention matrix in memory: O(L) memory, O(L²) FLOPs.
+- `is_causal=True` for training, `False` with KV-cache.
 
-### RoPE avec extension NTK
+### RoPE with NTK Extension
 
 ```python
 # rope.py
@@ -170,10 +170,10 @@ def precompute_freqs_cis(dim, max_seq_len, base=10000., scale_factor=1.0):
     return torch.polar(torch.ones_like(angles), angles)
 ```
 
-Extension dynamique : si `seq_len > max_seq_len`, le facteur d'échelle NTK est recalculé automatiquement → **contexte illimité sans perte de qualité**.
+Dynamic extension: If `seq_len > max_seq_len`, the NTK scale factor is automatically recomputed → **unlimited context without quality loss**.
 
 | Config | `max_seq_len` | `context_len` (NTK) |
-|--------|--------------|---------------------|
+|--------|---------------|---------------------|
 | nano | 512 | 4K |
 | small | 2048 | 32K |
 | medium | 4096 | 128K |
@@ -181,21 +181,21 @@ Extension dynamique : si `seq_len > max_seq_len`, le facteur d'échelle NTK est 
 
 ---
 
-## 6. KV-Cache Fractal
+## 6. Fractal KV-Cache
 
-### Principe
+### Principle
 
-Les niveaux supérieurs de la hiérarchie fractale changent moins vite que les niveaux inférieurs. Le cache fractal exploite cette propriété :
+Higher levels of the fractal hierarchy change more slowly than lower levels. The fractal cache exploits this property:
 
 ```
-Niveau k recompute tous les b^k tokens
-Niveau 0 : chaque token
-Niveau 1 : tous les 2 tokens
-Niveau 2 : tous les 4 tokens
-Niveau K : tous les 16 tokens (pour b=2, K=4)
+Level k recomputes every b^k tokens
+Level 0: every token
+Level 1: every 2 tokens
+Level 2: every 4 tokens
+Level K: every 16 tokens (for b=2, K=4)
 ```
 
-### Implémentation
+### Implementation
 
 ```python
 # kv_cache.py
@@ -204,60 +204,60 @@ class FractalStateCache:
         return step % (self.branching ** level) == 0
 ```
 
-**Résultat** : inférence autoregressive en O(1) par token (au lieu de O(L) pour recalculer tout le contexte).
+**Result**: Autoregressive inference in O(1) per token (instead of O(L) to recompute the entire context).
 
 ---
 
-## 7. Mémoire Persistante Inter-Contexte
+## 7. Persistent Cross-Context Memory
 
 ### Architecture
 
 ```
-Mémoire [B, M, d]  ← M slots initialisés aléatoirement (petites valeurs)
+Memory [B, M, d]  ← M slots randomly initialized (small values)
 
 READ  : Q = LayerNorm(ctx) @ W_q
         K, V = Memory @ W_k, Memory @ W_v
         output = softmax(QKᵀ/√d) @ V   ← cross-attention
 
-WRITE : summary = mean(ctx, dim=1)       ← résumé du contexte
-        gate = sigmoid(summary @ W_gate) ← [M] importance par slot
-        candidate = summary @ W_write    ← [M, d] valeurs candidates
+WRITE : summary = mean(ctx, dim=1)       ← context summary
+        gate = sigmoid(summary @ W_gate) ← [M] importance per slot
+        candidate = summary @ W_write    ← [M, d] candidate values
         Memory ← (1−gate)·Memory + gate·candidate  ← EMA gated
 ```
 
 ### FractalMemoryBank
 
-Pour les modèles avec `memory_per_level=True`, chaque niveau fractal possède sa propre banque :
+For models with `memory_per_level=True`, each fractal level has its own bank:
 
 ```
-Niveau 0 : mémoire épisodique (8 slots, mise à jour fréquente)
-Niveau 1 : mémoire de travail (16 slots)
-Niveau 2 : mémoire sémantique (32 slots)
-Niveau K : mémoire encyclopédique (64+ slots, rare mise à jour)
+Level 0: episodic memory (8 slots, frequent updates)
+Level 1: working memory (16 slots)
+Level 2: semantic memory (32 slots)
+Level K: encyclopedic memory (64+ slots, rare updates)
 ```
 
-**La mémoire survit entre les conversations** — elle peut être sauvegardée sur disque et rechargée (`save_memory()` / `load_memory()`).
+**Memory survives between conversations** — it can be saved to disk and reloaded (`save_memory()` / `load_memory()`).
 
 ---
 
-## 8. NFMC v3.0 — Noyau Fractal Condensé
+## 8. NFMC v3.0 — Condensed Fractal Kernel
 
-### Le noyau universel
+### The Universal Kernel
 
 ```
 K(x, y) = ∫_Ω exp(i·Φ_ω(x,y)) dμ(ω)
 ```
 
-Approximé par Random Fourier Features fractals :
+Approximated by fractal Random Fourier Features:
 
 ```
 K(x,y) ≈ φ(x)ᵀφ(y)
 
 φ(x) = [cos(W·x + b), sin(W·x + b)] · √(2/r)
-W : fréquences fractal 1/f — bande k : W_k ~ N(0, 2^(k/n_scales)·I)
+W: 1/f fractal frequencies — band k: W_k ~ N(0, 2^(k/n_scales)·I)
 ```
 
-### Condensation spectrale (one-shot, zéro SGD)
+### Spectral Condensation (one-shot, zero SGD)
 
 ```python
 # condensate.py
@@ -266,88 +266,88 @@ class SpectralCondensate:
         features -= features.mean(0)
         _, S, Vh = torch.linalg.svd(features, full_matrices=False)
         self.U = Vh[:self.rank].T   # top-r eigenvectors
-        self.S = S[:self.rank] / S[0]  # normalised eigenvalues
+        self.S = S[:self.rank] / S[0]  # normalized eigenvalues
 ```
 
-### Verrouillage de phase Helmholtz
+### Helmholtz Phase Locking
 
 ```
-E(θ) = −½ Σᵢⱼ K̃(xᵢ,xⱼ) cos(θᵢ − θⱼ)   [énergie libre de Helmholtz]
+E(θ) = −½ Σᵢⱼ K̃(xᵢ,xⱼ) cos(θᵢ − θⱼ)   [Helmholtz free energy]
 
-Mise à jour Kuramoto :
+Kuramoto update:
 θᵢ ← θᵢ + η Σⱼ K̃(xᵢ,xⱼ) sin(θⱼ − θᵢ)
 ```
 
-Les **attracteurs de phase** correspondent aux catégories syntaxiques et sémantiques.
+The **phase attractors** correspond to syntactic and semantic categories.
 
 ---
 
 ## 9. v3.1 — ZeroShotNFMC
 
-### Embedding analytique (0 paramètre)
+### Analytic Embedding (0 parameters)
 
 ```python
 # analytic_embed.py
-# e_k(t) = cos(ω_k · t/V · 2π) pour k ∈ [0, d/2)
-# ω_k = base^(k / (d/2))  — réseau de fréquences fractal
+# e_k(t) = cos(ω_k · t/V · 2π) for k ∈ [0, d/2)
+# ω_k = base^(k / (d/2))  — fractal frequency network
 
-FractalCodepointEmbedding :  [V, d]  ← 0 paramètre, table de buffers
-CharClassEmbedding :          [V, 16] ← voyelle/consonne/chiffre/ponct
-AnalyticTokenEmbedding :      fusion via projection orthogonale fixe (QR)
+FractalCodepointEmbedding:  [V, d]  ← 0 parameters, buffer table
+CharClassEmbedding:         [V, 16] ← vowel/consonant/digit/punct
+AnalyticTokenEmbedding:     fusion via fixed orthogonal projection (QR)
 ```
 
-### Mémoire de Hopfield Moderne (capacité exponentielle)
+### Modern Hopfield Memory (exponential capacity)
 
-Ramsauer et al., 2020 — capacité O(exp(d/2)) :
+Ramsauer et al., 2020 — capacity O(exp(d/2)):
 
 ```
 x_new = Xᵀ · softmax(β · X · ξ / √d)
 ```
 
-Patterns semés depuis :
-1. Vecteurs de Fourier aux **fréquences de Farey/Mandelbrot**
-2. Vecteurs aléatoires à pondération **Zipf**
-3. Vecteurs orthogonaux de couverture uniforme
+Patterns seeded from:
+1. Fourier vectors at **Farey/Mandelbrot frequencies**
+2. Random vectors with **Zipf** weighting
+3. Orthogonal vectors for uniform coverage
 
-### Fréquences de Mandelbrot (séquence de Farey)
+### Mandelbrot Frequencies (Farey Sequence)
 
-L'ensemble de Mandelbrot est paramétrisé par l'angle externe θ ∈ [0,1). Les angles p/q (fraction de Farey) correspondent aux **points paraboliques de période q** :
+The Mandelbrot set is parameterized by the external angle θ ∈ [0,1). The angles p/q (Farey fraction) correspond to the **parabolic points of period q**:
 
 ```
-1/2  → période 2 (bulbe principal gauche)
-1/3  → période 3
-1/4  → période 4
-2/5  → période 5
-...  [Séquence de Stern-Brocot]
+1/2  → period 2 (left main bulb)
+1/3  → period 3
+1/4  → period 4
+2/5  → period 5
+...  [Stern-Brocot Sequence]
 ```
 
-Ces fréquences correspondent exactement aux échelles temporelles du langage :
-- Période 2 : binaire sujet/prédicat
-- Période 3 : triplet SVO (Sujet-Verbe-Objet)
-- Période 4 : structures quaternaires (déterminant-nom-verbe-complément)
+These frequencies correspond exactly to the temporal scales of language:
+- Period 2: binary subject/predicate
+- Period 3: SVO triplet (Subject-Verb-Object)
+- Period 4: quaternary structures (determiner-noun-verb-complement)
 
-### Décodeur Zipfien
+### Zipfian Decoder
 
-La loi de Zipf : `P(rang=k) ∝ k^{−α}` est universelle pour le langage naturel.
-Initialisation du décodeur :
+Zipf's law: `P(rank=k) ∝ k^{−α}` is universal for natural language.
+Decoder initialization:
 
 ```python
 # hopfield.py
-# W[k,:] = vecteur_singulier_k * k^{-α/2}  — structure spectrale Zipf
-# bias[k] = -α · log(k)                     — distribution marginale correcte
+# W[k,:] = singular_vector_k * k^{-α/2}  — Zipf spectral structure
+# bias[k] = -α · log(k)                  — correct marginal distribution
 ```
 
-**Résultat** : distribution correcte dès le premier passage, sans aucun exemple.
+**Result**: Correct distribution from the first pass, without any examples.
 
-### Prédicteur de Phase Causal
+### Causal Phase Predictor
 
 ```
 dθₜ/dt = Ω(xₜ) + K(xₜ) ⊙ Σⱼ<ₜ sin(θⱼ − θₜ)
 ```
 
-- `Ω(xₜ) = W_Ω · xₜ` : fréquences naturelles conditionnées à l'entrée
-- Causalité stricte vérifiée (diff = 0.000000 sur entrées futures)
-- Fréquences initiales = angles de Mandelbrot (fixes)
+- `Ω(xₜ) = W_Ω · xₜ`: natural frequencies conditioned on input.
+- Strict causality verified (diff = 0.000000 on future inputs).
+- Initial frequencies = Mandelbrot angles (fixed).
 
 ---
 
@@ -355,120 +355,120 @@ dθₜ/dt = Ω(xₜ) + K(xₜ) ⊙ Σⱼ<ₜ sin(θⱼ − θₜ)
 
 ### FractalLinearAttention — O(L·d²)
 
-Identité kernelisée (Katharopoulos et al., 2020) :
+Kernelized identity (Katharopoulos et al., 2020):
 
 ```
-(φ(Q)φ(K)ᵀ)V = φ(Q)(φ(K)ᵀV)    [associativité]
+(φ(Q)φ(K)ᵀ)V = φ(Q)(φ(K)ᵀV)    [associativity]
 O(L²d)         O(Ld²)
 ```
 
-Implémentation causale via somme cumulée :
+Causal implementation via cumulative sum:
 
 ```python
 for i in range(L):
-    kv_sum += k[i].outer(v[i])   # [d, d] — pas de matrice L×L
+    kv_sum += k[i].outer(v[i])   # [d, d] — no L×L matrix
     k_sum  += k[i]               # [d]
     out[i] = (q[i] @ kv_sum) / (q[i] · k_sum)
 ```
 
-Maps de features multi-échelles : `φ_k(x) = elu(x + freq_Mandelbrot_k) + 1`
+Multi-scale feature maps: `φ_k(x) = elu(x + freq_Mandelbrot_k) + 1`
 
-| L | Attn standard | FractalLinearAttn | Gain |
+| L | Standard Attn | FractalLinearAttn | Gain |
 |---|---------------|-------------------|------|
 | 512 | 33.6M FLOPs | 8.4M | 4× |
 | 4096 | 2.15B | 134M | 16× |
 | 32768 | 137B | 537M | **255×** |
 
-### PhaseRoutedMoE — Routing continu von Mises
+### PhaseRoutedMoE — Continuous von Mises Routing
 
 ```
-gate_e(x) = exp(κ · cos(θ_x − θ_e)) / Z     [distribution von Mises]
+gate_e(x) = exp(κ · cos(θ_x − θ_e)) / Z     [von Mises distribution]
 
-θ_x = atan2(W_im·x, W_re·x)   ← phase encodée depuis l'entrée
-θ_e = angles de Mandelbrot     ← phases expertes fixes (semées)
+θ_x = atan2(W_im·x, W_re·x)   ← phase encoded from input
+θ_e = Mandelbrot angles       ← fixed expert phases (seeded)
 ```
 
-**Propriétés vérifiées :**
-- Charges experts sans loss auxiliaire : 0.296 / 0.267 / 0.243 / 0.193 ≈ 0.25
-- Gradients continus partout (pas de argmax discret)
-- K=2/E=8 experts actifs = 25% des FLOPs d'un FFN dense
+**Verified Properties:**
+- Expert loads without auxiliary loss: 0.296 / 0.267 / 0.243 / 0.193 ≈ 0.25
+- Continuous gradients everywhere (no discrete argmax)
+- K=2/E=8 active experts = 25% of the FLOPs of a dense FFN
 
-### PhaseSoliton — Cohérence long-range
+### PhaseSoliton — Long-Range Coherence
 
 ```
 gain(x) = sigmoid(W_gain · θ(x) + coherence(x) / τ)
 out = LayerNorm(x + gain · x)
 ```
 
-Amplifie les patterns de phase cohérents, supprime le bruit incohérent.
-Prévient l'effacement des dépendances longue portée sans attention quadratique.
+Amplifies coherent phase patterns, suppresses incoherent noise.
+Prevents the erasure of long-range dependencies without quadratic attention.
 
 ---
 
-## 11. Entraînement BPTP
+## 11. BPTP Training
 
 ### Back-Propagation Through Phase
 
-La loss totale :
+The total loss:
 
 ```
 L = L_task + λ_phase · L_phase + λ_freq · L_freq + λ_spectral · L_spectral
 
 L_task     = CrossEntropy(logits, targets)
-L_phase    = ||phases − phases_target||²   [synchronisation cible]
-L_freq     = ||FFT(phases)||²_hors_bande   [pureté spectrale]
-L_spectral = ||W||²_spectral              [régularisation norme spectrale]
+L_phase    = ||phases − phases_target||²   [target synchronization]
+L_freq     = ||FFT(phases)||²_out_of_band  [spectral purity]
+L_spectral = ||W||²_spectral               [spectral norm regularization]
 ```
 
-### Optimiseur différencié
+### Differentiated Optimizer
 
 ```python
 # trainer.py
-# Paramètres sinusoïdaux (A, ω, φ, γ) : LR × 0.3, weight_decay=0
-# Autres paramètres : LR standard, weight_decay=0.1
+# Sinusoidal parameters (A, ω, φ, γ): LR × 0.3, weight_decay=0
+# Other parameters: Standard LR, weight_decay=0.1
 ```
 
-Les paramètres sinusoïdaux ont un LR réduit car leurs gradients sont naturellement plus grands (fonctions périodiques à grande dérivée).
+Sinusoidal parameters have a reduced LR because their gradients are naturally larger (periodic functions with large derivatives).
 
-### Fonctionnalités
+### Features
 
-| Fonctionnalité | Paramètre | Notes |
-|---------------|-----------|-------|
-| Accumulation de gradient | `grad_accumulation_steps` | simuler grands batch |
-| Mixed precision | `dtype=torch.bfloat16` | AMP avec GradScaler |
-| Gradient checkpointing | `use_grad_checkpointing=True` | −50% mémoire |
-| torch.compile | `compile_model=True` | 2-3× sur Ampere+ |
+| Feature | Parameter | Notes |
+|---------|-----------|-------|
+| Gradient accumulation | `grad_accumulation_steps` | Simulate large batches |
+| Mixed precision | `dtype=torch.bfloat16` | AMP with GradScaler |
+| Gradient checkpointing | `use_grad_checkpointing=True` | −50% memory |
+| torch.compile | `compile_model=True` | 2-3× on Ampere+ |
 | Scheduler | cosine + warmup | ratio min_lr=0.1 |
 
 ---
 
-## 12. Tokenizer Trois Niveaux
+## 12. Three-Tier Tokenizer
 
 ```
-Tier 1 — TiktokenTokenizer  : cl100k_base (100K vocab, qualité GPT-4)
-Tier 2 — BPETokenizer       : BPE pur Python, entraînable depuis zéro (32K)
-Tier 3 — CharTokenizer      : 110 tokens, toujours disponible (fallback)
+Tier 1 — TiktokenTokenizer: cl100k_base (100K vocab, GPT-4 quality)
+Tier 2 — BPETokenizer: Pure Python BPE, trainable from scratch (32K)
+Tier 3 — CharTokenizer: 110 tokens, always available (fallback)
 
-Auto-sélection : tiktoken > char (si tiktoken non installé)
+Auto-selection: tiktoken > char (if tiktoken is not installed)
 ```
 
-Tokens spéciaux : `<pad>` `<bos>` `<eos>` `<unk>` `<sep>` `<sys>` `<usr>` `<ast>` `<code>` `</code>` `<think>` `</think>`
+Special tokens: `<pad>` `<bos>` `<eos>` `<unk>` `<sep>` `<sys>` `<usr>` `<ast>` `<code>` `</code>` `<think>` `</think>`
 
 ---
 
 ## 13. Multi-GPU DDP / FSDP
 
 ```bash
-# DDP — modèle répliqué sur chaque GPU
+# DDP — model replicated on each GPU
 torchrun --nproc_per_node=4 train.py --distributed ddp
 
-# FSDP — modèle fragmenté (pour très grands modèles)
+# FSDP — sharded model (for very large models)
 torchrun --nproc_per_node=8 train.py --distributed fsdp
 ```
 
-**FSDP** utilise `MixedPrecision(param_dtype=bfloat16, reduce_dtype=float32)` et `ShardingStrategy.FULL_SHARD` avec `BackwardPrefetch.BACKWARD_PRE` pour les meilleures performances.
+**FSDP** uses `MixedPrecision(param_dtype=bfloat16, reduce_dtype=float32)` and `ShardingStrategy.FULL_SHARD` with `BackwardPrefetch.BACKWARD_PRE` for optimal performance.
 
-Les `NFNBlock` sont auto-wrappés comme couches FSDP grâce à `transformer_auto_wrap_policy`.
+The `NFNBlock` layers are automatically wrapped as FSDP units via `transformer_auto_wrap_policy`.
 
 ---
 
