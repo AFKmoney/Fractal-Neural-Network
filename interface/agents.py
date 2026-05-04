@@ -179,15 +179,62 @@ class ReasoningAgent:
 
     # ── Tools ─────────────────────────────────────────────────────────────────
 
+    def _safe_eval(self, expr: str) -> Any:
+        import ast
+        import operator
+        import math
+
+        allowed_ops = {
+            ast.Add: operator.add, ast.Sub: operator.sub,
+            ast.Mult: operator.mul, ast.Div: operator.truediv,
+            ast.FloorDiv: operator.floordiv, ast.Pow: operator.pow,
+            ast.Mod: operator.mod, ast.USub: operator.neg,
+            ast.UAdd: operator.pos
+        }
+
+        allowed_funcs = {
+            "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
+            **{k: v for k, v in vars(math).items() if not k.startswith("_") and callable(v)}
+        }
+
+        allowed_names = {
+            "e": math.e, "pi": math.pi, "tau": math.tau, "inf": math.inf, "nan": math.nan
+        }
+
+        def _eval_node(node):
+            if isinstance(node, ast.Expression):
+                return _eval_node(node.body)
+            elif isinstance(node, ast.Constant):
+                return node.value
+            elif isinstance(node, ast.BinOp):
+                left = _eval_node(node.left)
+                right = _eval_node(node.right)
+                return allowed_ops[type(node.op)](left, right)
+            elif isinstance(node, ast.UnaryOp):
+                operand = _eval_node(node.operand)
+                return allowed_ops[type(node.op)](operand)
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id in allowed_funcs:
+                    args = [_eval_node(arg) for arg in node.args]
+                    return allowed_funcs[node.func.id](*args)
+                raise ValueError("Appel de fonction non autorisé")
+            elif isinstance(node, ast.Name):
+                if node.id in allowed_names:
+                    return allowed_names[node.id]
+                raise ValueError(f"Variable non autorisée: {node.id}")
+            elif isinstance(node, ast.List):
+                return [_eval_node(elt) for elt in node.elts]
+            elif isinstance(node, ast.Tuple):
+                return tuple(_eval_node(elt) for elt in node.elts)
+            else:
+                raise TypeError(f"Opération non supportée: {type(node).__name__}")
+
+        tree = ast.parse(expr, mode='eval')
+        return _eval_node(tree)
+
     def _tool_calculate(self, expr: str) -> str:
         try:
-            # Restricted eval — math only
-            allowed = {k: v for k, v in __builtins__.items()
-                       if k in ("abs", "round", "min", "max", "sum", "pow")} \
-                if isinstance(__builtins__, dict) else {}
-            import math
-            allowed.update({k: v for k, v in vars(math).items() if not k.startswith("_")})
-            result = eval(expr, {"__builtins__": {}}, allowed)
+            result = self._safe_eval(expr)
             return str(result)
         except Exception as e:
             return f"Erreur de calcul: {e}"
