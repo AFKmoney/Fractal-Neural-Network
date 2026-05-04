@@ -1,142 +1,142 @@
 # CHANGELOG — Neural Fractal Network (NFN)
 
-> **Auteur :** Philippe-Antoine Robert  
-> **Licence :** Propriétaire — Philippe-Antoine Robert, tous droits réservés
+> **Author:** Philippe-Antoine Robert
+> **License:** Proprietary — Philippe-Antoine Robert, all rights reserved
 
 ---
 
-## [3.2.0] — 2026-05-03 — EfficientNFN : Architecture de 2099
+## [3.2.0] — 2026-05-03 — EfficientNFN: Architecture of 2099
 
-### Nouveautés
+### New Features
 
-#### Architecture EfficientNFNBlock
-- **FractalLinearAttention** — Attention $O(L \cdot d^2)$ via trick du noyau linéaire, feature map multi-échelles par fréquences de Mandelbrot par niveau. Speedup vs attention standard : 4× à L=512, 16× à L=4096, **255× à L=32768**.
-- **PhaseSoliton** — Préservation de cohérence de phase long-range : amplifie les patterns cohérents, supprime le bruit. Remplace les dépendances LSTM/RNN avec $O(L \cdot n_p)$ complexité.
-- **PhaseRoutedMoE** — Routage d'experts par distribution de von Mises sur la distance angulaire. Top-K sparse, auto-équilibré sans perte auxiliaire. Phases d'experts initialisées depuis la suite de Farey/Mandelbrot.
+#### EfficientNFNBlock Architecture
+- **FractalLinearAttention** — Attention $O(L \cdot d^2)$ via linear kernel trick, multi-scale feature map using Mandelbrot frequencies per level. Speedup vs standard attention: 4× at L=512, 16× at L=4096, **255× at L=32768**.
+- **PhaseSoliton** — Long-range phase coherence preservation: amplifies coherent patterns, suppresses noise. Replaces LSTM/RNN dependencies with $O(L \cdot n_p)$ complexity.
+- **PhaseRoutedMoE** — Expert routing using von Mises distribution over angular distance. Top-K sparse, self-balancing without auxiliary loss. Expert phases initialized from the Farey/Mandelbrot sequence.
 
 #### EfficientNFNLanguageModel
-- Stack complet : `AnalyticTokenEmbedding → EfficientNFNBlocks → NFMC condensate → ZipfianDecoder`
-- Condensation Mandelbrot initiale sans corpus (`_seed_condensate_mandelbrot`)
-- `condense_from_text()` : raffinement one-shot depuis un corpus (pas de SGD)
-- `param_summary()` : décomposition par composant (embed, attn, MoE, soliton, head)
+- Complete stack: `AnalyticTokenEmbedding → EfficientNFNBlocks → NFMC condensate → ZipfianDecoder`
+- Initial Mandelbrot condensation without corpus (`_seed_condensate_mandelbrot`)
+- `condense_from_text()`: one-shot refinement from a corpus (no SGD)
+- `param_summary()`: breakdown by component (embed, attn, MoE, soliton, head)
 
-#### Nouveau fichier : `nfn/moe.py`
-- `PhaseEncoder` : encodage de phase différentiable
-- `PhaseRoutedMoE` : dispatch sparse Top-K avec gating von Mises
-- `FractalLinearAttention` : attention causale linéaire par somme cumulée
-- `PhaseSoliton` : cohérence de phase avec gate adaptative
+#### New file: `nfn/moe.py`
+- `PhaseEncoder`: differentiable phase encoding
+- `PhaseRoutedMoE`: sparse Top-K dispatch with von Mises gating
+- `FractalLinearAttention`: linear causal attention via cumulative sum
+- `PhaseSoliton`: phase coherence with adaptive gate
 
-#### Nouveau fichier : `nfn/efficient_block.py`
-- `EfficientNFNBlock` : bloc unifié FLA + Soliton + MoE
-- `EfficientNFNLanguageModel` : modèle complet v3.2
+#### New file: `nfn/efficient_block.py`
+- `EfficientNFNBlock`: unified block FLA + Soliton + MoE
+- `EfficientNFNLanguageModel`: full v3.2 model
 
-### Métriques de performance
-| L | Attention standard | FractalLinearAttn | Gain |
+### Performance Metrics
+| L | Standard Attention | FractalLinearAttn | Gain |
 |---|--------------------|-------------------|------|
 | 512 | 33.6M FLOPs | 8.4M FLOPs | **4×** |
 | 4096 | 2.15B FLOPs | 134M FLOPs | **16×** |
 | 32768 | 137B FLOPs | 537M FLOPs | **255×** |
 
-### Hyperparamètres ajoutés à `NFNConfig`
-- `moe_n_experts` (défaut : 8)
-- `moe_top_k` (défaut : 2)
-- `moe_d_ff_per_expert` (défaut : 256)
+### Hyperparameters added to `NFNConfig`
+- `moe_n_experts` (default: 8)
+- `moe_top_k` (default: 2)
+- `moe_d_ff_per_expert` (default: 256)
 
 ---
 
-## [3.1.0] — 2026-04-28 — ZeroShotNFMC : Intelligence Analytique Sans Entraînement
+## [3.1.0] — 2026-04-28 — ZeroShotNFMC: Analytic Intelligence Without Training
 
-### Nouveautés
+### New Features
 
-#### Embedding analytique zéro-paramètre
-- **FractalCodepointEmbedding** : table pré-calculée par Fourier sur les codepoints, buffer fixe (0 params appris).
-- **CharClassEmbedding** : 16 features morphologiques (voyelle, consonne, chiffre, hash MD5, etc.), buffer fixe.
-- **AnalyticTokenEmbedding** : fusion via projection QR orthogonale + LayerNorm sans paramètres. Résultat : **0 paramètre appris** dans l'embedding.
+#### Zero-parameter Analytic Embedding
+- **FractalCodepointEmbedding**: pre-computed Fourier table on codepoints, fixed buffer (0 learned params).
+- **CharClassEmbedding**: 16 morphological features (vowel, consonant, digit, MD5 hash, etc.), fixed buffer.
+- **AnalyticTokenEmbedding**: fusion via fixed orthogonal QR projection + LayerNorm without parameters. Result: **0 learned parameters** in embedding.
 
-#### Nouveau fichier : `nfn/analytic_embed.py`
+#### New file: `nfn/analytic_embed.py`
 
-#### Fréquences de Mandelbrot et suite de Farey
-- `farey_sequence(n)` : algorithme de la médiante de Farey
-- `mandelbrot_frequencies(n)` : angles externes des bulbes de Mandelbrot, triés par période croissante
+#### Mandelbrot Frequencies and Farey Sequence
+- `farey_sequence(n)`: Farey mediant algorithm
+- `mandelbrot_frequencies(n)`: external angles of Mandelbrot bulbs, sorted by increasing period
 
-#### Mémoire de Hopfield moderne
-- **ModernHopfieldMemory** : patterns Fourier (Mandelbrot) + Zipf + QR. Capacité $O(e^{d/2})$.
-- **ZipfianDecoder** : prior de Zipf optimal pour un vocabulaire inconnu.
-- **CausalPhasePredictor** : prédiction de phase strictement causale.
+#### Modern Hopfield Memory
+- **ModernHopfieldMemory**: Fourier patterns (Mandelbrot) + Zipf + QR. Capacity $O(e^{d/2})$.
+- **ZipfianDecoder**: optimal Zipf prior for an unknown vocabulary.
+- **CausalPhasePredictor**: strictly causal phase prediction.
 
-#### Nouveau fichier : `nfn/hopfield.py`
+#### New file: `nfn/hopfield.py`
 
-#### ZeroShotNFMC (réécriture complète de `nfn/nfmc.py`)
+#### ZeroShotNFMC (complete rewrite of `nfn/nfmc.py`)
 
-### Résultats de convergence
-| Modèle | Perte initiale | Après 100 pas | Amélioration |
-|--------|----------------|---------------|--------------|
+### Convergence Results
+| Model | Initial Loss | After 100 steps | Improvement |
+|-------|--------------|-----------------|-------------|
 | Transformer baseline | 4.70 | 2.88 | −38.7% |
 | ZeroShotNFMC v3.1 | 5.96 | **1.47** | **−75.3%** |
 
-### Correction de bug
-- `AnalyticTokenEmbedding` : `nn.LayerNorm` créait 128 paramètres cachés. Corrigé avec `elementwise_affine=False`.
+### Bug Fix
+- `AnalyticTokenEmbedding`: `nn.LayerNorm` was creating 128 hidden parameters. Fixed with `elementwise_affine=False`.
 
 ---
 
-## [3.0.0] — 2026-04-20 — NFMC : Noyau Fractal Multidimensionnel Condensé
+## [3.0.0] — 2026-04-20 — NFMC: Condensed Multidimensional Fractal Kernel
 
-### Nouveautés
+### New Features
 
-#### Nouveau fichier : `nfn/condensate.py`
-- **FractalRFF** : random Fourier features multi-échelles, buffers fixes.
-- **SpectralCondensate** : SVD one-shot via `torch.linalg.svd`.
-- **HelmholtzPhaseLocking** : descente de gradient sur l'énergie XY.
-- **NFMCKernelLayer** : couche plug-in pour `NFNBlock`.
+#### New file: `nfn/condensate.py`
+- **FractalRFF**: multi-scale random Fourier features, fixed buffers.
+- **SpectralCondensate**: one-shot SVD via `torch.linalg.svd`.
+- **HelmholtzPhaseLocking**: gradient descent on XY energy.
+- **NFMCKernelLayer**: plug-in layer for `NFNBlock`.
 
 #### NFMCLanguageModel (`nfn/nfmc.py`)
-- `condense_from_text()` : SVD one-shot, aucun SGD
-- `condense_vocabulary()` : initialisation par bigrammes
+- `condense_from_text()`: one-shot SVD, no SGD
+- `condense_vocabulary()`: initialization via bigrams
 
-#### Nouveau config : `configs/large.json`
-- d=1024, 12 blocs, use_nfmc=true, rang r=128, contexte 128K
+#### New config: `configs/large.json`
+- d=1024, 12 blocks, use_nfmc=true, rank r=128, context 128K
 
-### Hyperparamètres ajoutés
+### Hyperparameters added
 - `use_nfmc`, `nfmc_n_rff`, `nfmc_n_scales`, `nfmc_rank`
 - `nfmc_n_phases`, `nfmc_lock_iter`, `nfmc_eta`, `nfmc_lambda_phase`
 
 ---
 
-## [2.0.0] — 2026-04-10 — Flash Attention, RoPE/NTK, KV-Cache, Kuramoto, Mémoire, Multi-GPU
+## [2.0.0] — 2026-04-10 — Flash Attention, RoPE/NTK, KV-Cache, Kuramoto, Memory, Multi-GPU
 
-### Nouveautés majeures
+### Major New Features
 
 - **Flash Attention** via `torch.nn.functional.scaled_dot_product_attention`
-- **RoPE + NTK scaling** : extension contexte 4K → 32K+ sans réentraînement
-- **KV-Cache fractal** : `nfn/kv_cache.py` — O(1) par token
-- **Kuramoto ODE RK4** : `nfn/phase_ode.py` — BPTP compatible
-- **Mémoire persistante** : `nfn/memory.py` — M slots, EMA gated
-- **Tokenizer 3 niveaux** : `nfn/tokenizer.py` — tiktoken/BPE/char
-- **Multi-GPU DDP/FSDP** : `training/distributed.py`
+- **RoPE + NTK scaling**: context extension 4K → 32K+ without retraining
+- **Fractal KV-Cache**: `nfn/kv_cache.py` — O(1) per token
+- **Kuramoto ODE RK4**: `nfn/phase_ode.py` — BPTP compatible
+- **Persistent Memory**: `nfn/memory.py` — M slots, EMA gated
+- **3-tier Tokenizer**: `nfn/tokenizer.py` — tiktoken/BPE/char
+- **Multi-GPU DDP/FSDP**: `training/distributed.py`
 - **Gradient accumulation** + `torch.compile` + grad checkpointing
-- Nouveaux endpoints API : `/api/condense`, `/api/memory/reset`, `/api/memory/state`
+- New API endpoints: `/api/condense`, `/api/memory/reset`, `/api/memory/state`
 
 ---
 
-## [1.0.0] — 2026-04-01 — Implémentation initiale NFN
+## [1.0.0] — 2026-04-01 — Initial NFN Implementation
 
-- Topologie fractale : arbre binaire + Cantor
+- Fractal topology: binary tree + Cantor
 - SinusoidalAggregator / SinusoidalBroadcast
-- NFNBlock : MotifBranches + CausalSelfAttention + TemporalRefinement
+- NFNBlock: MotifBranches + CausalSelfAttention + TemporalRefinement
 - NFNLanguageModel, NFNTrainer, NFNInferenceEngine
 - FastAPI server + WebSocket streaming
-- Configs nano/small/medium
+- nano/small/medium configs
 
 ---
 
-## Versions futures prévues
+## Planned Future Versions
 
-### [4.0.0] — Planifié
-- **Continuous-Time Fractal Network** : ODE neurale fractale intégrée par RK adaptatif
-- **Sparse Fractal Attention** : FractalLinearAttention + attention locale fenêtrée (>1M tokens)
-- **Meta-learning fractal** : topologie adaptative selon le type de données
+### [4.0.0] — Planned
+- **Continuous-Time Fractal Network**: fractal neural ODE integrated via adaptive RK
+- **Sparse Fractal Attention**: FractalLinearAttention + windowed local attention (>1M tokens)
+- **Fractal Meta-learning**: adaptive topology based on data type
 
 ---
 
 *Philippe-Antoine Robert — 2026-05-03 07:22:48 UTC*  
-*"Chaque version est un saut, pas un pas."*
+*"Every version is a leap, not a step."*
