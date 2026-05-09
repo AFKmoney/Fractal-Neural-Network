@@ -193,7 +193,8 @@ class PhaseGoalPredictor(nn.Module):
         Call once before generation begins.
         """
         summary = h_prompt.mean(1)                 # [B, d]
-        self._goal_phase = self.encoder(summary)   # [B, n_phases]
+        # Detach: _goal_phase is persistent state, must not retain graph across steps
+        self._goal_phase = self.encoder(summary).detach()   # [B, n_phases]
 
     def forward(
         self,

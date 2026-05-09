@@ -102,7 +102,7 @@ class EpisodicStore(nn.Module):
         keys = self._encode_key(h)                 # [B, key_dim]
         for b in range(B):
             idx = self.ptr.item() % self.capacity
-            self.keys[idx]   = keys[b]
+            self.keys[idx]   = keys[b].detach()
             self.values[idx] = h[b].detach()
             self.freq_count[idx] = 0
             self.ptr.add_(1)
@@ -121,7 +121,9 @@ class EpisodicStore(nn.Module):
             return torch.zeros_like(query), torch.zeros(query.shape[0], self.n_read, dtype=torch.long)
 
         q_key = self._encode_key(query)               # [B, key_dim]
-        sims  = q_key @ self.keys[:n].T               # [B, n]
+        # Clone to get independent storage; inplace writes to self.keys in write()
+        # would otherwise corrupt the version counter during backward.
+        sims  = q_key @ self.keys[:n].clone().detach().T  # [B, n]
         k     = min(self.n_read, n)
         top_v, top_i = torch.topk(sims, k, dim=-1)   # [B, k]
 
@@ -208,9 +210,9 @@ class SemanticConsolidator(nn.Module):
                 self.U * self.S.unsqueeze(0),           # [d, r]  old weighted
                 V_new[:, :r] * (alpha * S_new[:r] / (S_new[0] + 1e-8)).unsqueeze(0),
             ], dim=1)                                   # [d, 2r]
-            _, S_m, Vh_m = torch.linalg.svd(merged, full_matrices=False)
-            r_new = min(self.rank, Vh_m.shape[0])
-            self.U[:, :r_new] = Vh_m[:r_new].T
+            U_m, S_m, _ = torch.linalg.svd(merged, full_matrices=False)
+            r_new = min(self.rank, U_m.shape[1])
+            self.U[:, :r_new] = U_m[:, :r_new]   # [d, r_new] left singular vectors
             self.S[:r_new]    = S_m[:r_new] / (S_m[0] + 1e-8)
 
     def read(self, h: torch.Tensor) -> torch.Tensor:
@@ -220,8 +222,11 @@ class SemanticConsolidator(nn.Module):
         """
         if not self.initialized.item():
             return torch.zeros_like(h)
-        coords = h @ self.U              # [B, rank]
-        coords = coords * self.S.unsqueeze(0)
+        # clone() ensures inplace consolidation writes don't corrupt backward
+        U = self.U.clone().detach()
+        S = self.S.clone().detach()
+        coords = h @ U                   # [B, rank]
+        coords = coords * S.unsqueeze(0)
         return self.out_proj(coords)     # [B, d_model]
 
 

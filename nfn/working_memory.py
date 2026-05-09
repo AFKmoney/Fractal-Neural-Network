@@ -172,10 +172,10 @@ class FractalWorkingMemory(nn.Module):
 
         # Erase: M_i ← M_i * (1 - g * w_i * e)
         erase = 1.0 - g.unsqueeze(1) * w.unsqueeze(-1) * e.unsqueeze(1)
-        self._memory = self._memory * erase
+        new_mem = self._memory.detach() * erase
 
-        # Add: M_i ← M_i + g * w_i * a
-        self._memory = self._memory + g.unsqueeze(1) * w.unsqueeze(-1) * a.unsqueeze(1)
+        # Add: M_i ← M_i + g * w_i * a  (detach persistent state to truncate BPTT)
+        self._memory = (new_mem + g.unsqueeze(1) * w.unsqueeze(-1) * a.unsqueeze(1)).detach()
 
     # ─── combined forward ─────────────────────────────────────────────────────
 

@@ -170,8 +170,12 @@ class ChunkedForward(nn.Module):
                 result = block(h, write_memory=True)
                 h     = result[0] if isinstance(result, tuple) else result
                 if isinstance(result, tuple) and len(result) > 1:
-                    for k, v in result[1].items():
-                        chunk_losses[k] = chunk_losses.get(k, 0.0) + v
+                    aux = result[1]
+                    if isinstance(aux, dict):
+                        for k, v in aux.items():
+                            chunk_losses[k] = chunk_losses.get(k, 0.0) + v
+                    elif isinstance(aux, torch.Tensor):
+                        chunk_losses["pred"] = chunk_losses.get("pred", 0.0) + aux
 
             # Strip ghost token from output
             if prev_summary is not None:
