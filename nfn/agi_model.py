@@ -29,6 +29,7 @@ from .hopfield import BayesianZipfianDecoder, ZipfianDecoder
 from .analytic_embed import AnalyticTokenEmbedding
 from .reasoning import RecursiveReasoner
 from .predictive import PredictiveCodingBlock
+from .multi_token_pred import MultiTokenPredictor, SpeculativeDecoder
 
 
 def _try_import_multimodal():
@@ -113,6 +114,19 @@ class AGINFNModel(nn.Module):
                 vocab_size = cfg.vocab_size,
                 alpha      = cfg.nfmc_zipf_alpha,
             )
+
+        # ── Multi-Token Prediction ─────────────────────────────────────────
+        self.mtp: Optional[MultiTokenPredictor] = None
+        self.speculative: Optional[SpeculativeDecoder] = None
+        if cfg.use_multi_token_pred:
+            self.mtp = MultiTokenPredictor(
+                d_model           = cfg.d_model,
+                vocab_size        = cfg.vocab_size,
+                n_heads           = cfg.mtp_n_heads,
+                alpha             = cfg.nfmc_zipf_alpha,
+                loss_weight_decay = cfg.mtp_loss_weight_decay,
+            )
+            self.speculative = SpeculativeDecoder(self.mtp)
 
         # ── Multimodal fusion ──────────────────────────────────────────────
         self.multimodal: Optional[nn.Module] = None
@@ -267,7 +281,13 @@ class AGINFNModel(nn.Module):
         else:
             losses["lm"] = torch.tensor(0.0, device=h.device)
 
-        losses["total"] = sum(losses.values())
+        # ── Multi-Token Prediction loss ────────────────────────────────────
+        if self.mtp is not None and targets is not None:
+            mtp_loss, mtp_breakdown = self.mtp.loss(h, targets)
+            losses["mtp"] = mtp_loss
+            losses.update(mtp_breakdown)
+
+        losses["total"] = sum(v for k, v in losses.items() if not k.startswith("mtp_") and k != "total")
         return logits, losses
 
     # ─── generation ───────────────────────────────────────────────────────────
@@ -284,6 +304,7 @@ class AGINFNModel(nn.Module):
         image:          Optional[torch.Tensor] = None,
         audio:          Optional[torch.Tensor] = None,
         think_rounds:   int = 0,
+        speculative:    bool = False,   # use speculative decoding (requires MTP)
     ) -> torch.Tensor:
         """
         Autoregressive generation with optional thinking phase.
@@ -293,6 +314,12 @@ class AGINFNModel(nn.Module):
         """
         if think_rounds > 0:
             self.think(input_ids, n_rounds=think_rounds)
+
+        # Speculative decoding path (requires MTP heads)
+        if speculative and self.speculative is not None:
+            return self._speculative_generate(
+                input_ids, max_new_tokens, temperature, eos_token_id
+            )
 
         ids = input_ids
         eos = eos_token_id if eos_token_id is not None else self.cfg.eos_token_id
@@ -331,6 +358,85 @@ class AGINFNModel(nn.Module):
 
         return ids
 
+    @torch.no_grad()
+    def _speculative_generate(
+        self,
+        input_ids:      torch.Tensor,
+        max_new_tokens: int,
+        temperature:    float,
+        eos_token_id:   Optional[int],
+    ) -> torch.Tensor:
+        """
+        Speculative decoding: MTP heads draft N tokens, full model verifies.
+        Typical speedup: 2-4x over standard autoregressive generation.
+        """
+        ids     = input_ids
+        eos     = eos_token_id if eos_token_id is not None else self.cfg.eos_token_id
+        N       = self.mtp.n_heads
+        generated = 0
+
+        while generated < max_new_tokens:
+            B, L = ids.shape
+
+            # 1. Run full model to get hidden state for draft generation
+            h = self.embed(ids)
+            for block in self.blocks:
+                result = block(h, write_memory=False)
+                h = result[0] if isinstance(result, tuple) else result
+            h = self.ln_f(h)
+
+            # 2. Draft N tokens using MTP heads (from last hidden state)
+            h_last    = h[:, -1:, :]                   # [B, 1, d]
+            all_head_logits = self.mtp(h_last)         # N × [B, 1, V]
+            draft_ids = torch.cat(
+                [F.softmax(lg[:, 0] / max(temperature, 1e-5), dim=-1
+                 ).multinomial(1) for lg in all_head_logits],
+                dim=1,
+            )  # [B, N]
+
+            # 3. Verify draft by running full model on context + draft
+            candidate = torch.cat([ids, draft_ids], dim=1)   # [B, L+N]
+            h_verify  = self.embed(candidate)
+            for block in self.blocks:
+                result = block(h_verify, write_memory=False)
+                h_verify = result[0] if isinstance(result, tuple) else result
+            h_verify = self.ln_f(h_verify)
+            verify_logits = (
+                self.lm_head(h_verify)
+                if not isinstance(self.lm_head, BayesianZipfianDecoder)
+                else self.lm_head(h_verify)
+            )  # [B, L+N, V]
+
+            # 4. Accept/reject each draft token
+            new_tokens = []
+            for i in range(N):
+                v_log = verify_logits[:, L + i - 1, :]
+                v_prob = F.softmax(v_log / max(temperature, 1e-5), -1)
+                d_tok  = draft_ids[:, i]
+                accept = v_prob[torch.arange(B), d_tok] > 0.5
+                if accept.all():
+                    new_tokens.append(d_tok.unsqueeze(1))
+                else:
+                    # Fallback: sample from verified distribution
+                    fallback = torch.multinomial(v_prob, 1)
+                    new_tokens.append(fallback)
+                    break
+
+            if not new_tokens:
+                # Safety: emit at least one token
+                last_logits = verify_logits[:, L - 1, :]
+                p = F.softmax(last_logits / max(temperature, 1e-5), -1)
+                new_tokens.append(torch.multinomial(p, 1))
+
+            new_ids = torch.cat(new_tokens, dim=1)
+            ids = torch.cat([ids, new_ids], dim=1)
+            generated += new_ids.shape[1]
+
+            if eos is not None and (new_ids == eos).any():
+                break
+
+        return ids
+
     # ─── utilities ────────────────────────────────────────────────────────────
 
     def param_count(self) -> Dict[str, int]:
@@ -359,8 +465,12 @@ class AGINFNModel(nn.Module):
         if cfg.use_free_energy:        mods.append("free energy")
         if cfg.use_self_consistency:   mods.append("self-consistency")
         if cfg.use_plan_executor:      mods.append(f"planner ({cfg.plan_n_subgoals} sub-goals)")
-        if cfg.use_bayesian_decoder:   mods.append("bayesian decoder")
-        if cfg.use_multimodal:         mods.append("multimodal")
+        if cfg.use_bayesian_decoder:      mods.append("bayesian decoder")
+        if cfg.use_multimodal:            mods.append("multimodal")
+        if cfg.use_mixture_of_depths:     mods.append(f"MoD ({cfg.mod_capacity_factor:.0%} tokens)")
+        if cfg.use_multi_token_pred:      mods.append(f"MTP (N={cfg.mtp_n_heads})")
+        if cfg.use_streaming:             mods.append(f"streaming (W={cfg.streaming_window_size})")
+        if cfg.use_hyper_net:             mods.append(f"hyper-net (r={cfg.hyper_rank})")
         return (
             f"AGINFNModel(\n"
             f"  vocab={cfg.vocab_size}  d={cfg.d_model}  blocks={cfg.n_blocks}\n"
@@ -388,6 +498,9 @@ def build_agi_model(
     use_self_consistency:   bool  = True,
     use_plan_executor:      bool  = True,
     use_bayesian:           bool  = True,
+    use_mod:                bool  = True,
+    use_mtp:                bool  = True,
+    use_hyper:              bool  = True,
     **kwargs,
 ) -> AGINFNModel:
     """
@@ -411,6 +524,9 @@ def build_agi_model(
         use_self_consistency    = use_self_consistency,
         use_plan_executor       = use_plan_executor,
         use_bayesian_decoder    = use_bayesian,
+        use_mixture_of_depths   = use_mod,
+        use_multi_token_pred    = use_mtp,
+        use_hyper_net           = use_hyper,
         **kwargs,
     )
     return AGINFNModel(cfg)

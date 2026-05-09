@@ -41,6 +41,8 @@ from .goal import PhaseGoalPredictor
 from .hopfield import BayesianZipfianDecoder
 from .reasoning import SelfConsistencyCheck, PlanExecutor
 from .predictive import FreeEnergyMinimiser
+from .mixture_of_depths import MixtureOfDepths
+from .hyper import ContextHyperNet, HyperResidual
 
 
 class AGIBlock(nn.Module):
@@ -51,8 +53,18 @@ class AGIBlock(nn.Module):
         self.block_idx = block_idx
         d = cfg.d_model
 
-        # ── Core sequence mixer ───────────────────────────────────────────
-        self.core = EfficientNFNBlock(cfg)
+        # ── Core sequence mixer (optionally wrapped with MoD) ─────────────
+        core_raw = EfficientNFNBlock(cfg)
+        if cfg.use_mixture_of_depths:
+            self.core = MixtureOfDepths(
+                d_model         = d,
+                block           = core_raw,
+                capacity_factor = cfg.mod_capacity_factor,
+                n_phases        = cfg.goal_n_phases,
+                lambda_router   = cfg.lambda_router,
+            )
+        else:
+            self.core = core_raw
 
         # ── Free Energy (belief compression, runs before core) ────────────
         self.free_energy: Optional[FreeEnergyMinimiser] = None
@@ -116,6 +128,20 @@ class AGIBlock(nn.Module):
         if cfg.use_plan_executor and cfg.use_goal_predictor:
             self.planner = PlanExecutor(cfg.goal_n_phases, cfg.plan_n_subgoals)
 
+        # ── Hyper-network (in-context weight adaptation) ──────────────────
+        self.hyper: Optional[HyperResidual] = None
+        if cfg.use_hyper_net:
+            self.hyper_net = ContextHyperNet(
+                d_model  = d,
+                n_phases = cfg.goal_n_phases,
+                rank     = cfg.hyper_rank,
+                z_dim    = cfg.hyper_z_dim,
+                scale    = cfg.hyper_scale,
+            )
+            self.hyper = HyperResidual(d, cfg.hyper_z_dim)
+        else:
+            self.hyper_net = None
+
         # ── Stream fusion ─────────────────────────────────────────────────
         n_streams = 1
         if cfg.use_episodic_memory: n_streams += 1
@@ -159,8 +185,13 @@ class AGIBlock(nn.Module):
             h, fe_loss = self.free_energy(h)
             losses["free_energy"] = losses.get("free_energy", 0.0) + fe_loss
 
-        # ── 2. Core EfficientNFNBlock ──────────────────────────────────────
-        h_core = self.core(h)
+        # ── 2. Core EfficientNFNBlock (+ optional MoD routing) ────────────
+        core_result = self.core(h)
+        if isinstance(core_result, tuple):
+            h_core, router_loss = core_result
+            losses["router"] = losses.get("router", 0.0) + router_loss * self.cfg.lambda_router
+        else:
+            h_core = core_result
         streams = [h_core]
 
         # ── 3. Two-Tier Memory ─────────────────────────────────────────────
@@ -226,6 +257,14 @@ class AGIBlock(nn.Module):
         if self.consistency is not None:
             h_fused, cons_loss = self.consistency(h_fused, self.causal)
             losses["consistency"] = losses.get("consistency", 0.0) + cons_loss * 0.1
+
+        # ── 9. Hyper-network residual modulation ───────────────────────────
+        if self.hyper is not None and self.hyper_net is not None:
+            goal_phase = None
+            if self.goal is not None and self.goal._goal_phase is not None:
+                goal_phase = self.goal._goal_phase
+            z, _ = self.hyper_net(h_fused, goal_phase)
+            h_fused = self.hyper(h_fused, z)
 
         return h_fused, losses
 

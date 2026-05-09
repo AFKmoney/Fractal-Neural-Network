@@ -154,6 +154,29 @@ class NFNConfig:
     use_plan_executor: bool = False
     plan_n_subgoals: int = 4
 
+    # ── Killer Features ────────────────────────────────────────────────────
+
+    # Mixture of Depths: skip easy tokens through blocks
+    use_mixture_of_depths: bool = False
+    mod_capacity_factor: float = 0.5      # fraction of tokens to process
+    lambda_router: float = 0.01           # MoD load balance penalty
+
+    # Multi-Token Prediction: predict N tokens ahead simultaneously
+    use_multi_token_pred: bool = False
+    mtp_n_heads: int = 4                  # lookahead depth
+    mtp_loss_weight_decay: float = 0.5    # weight decay across depths
+
+    # Infinite Streaming Context: O(1) memory per token
+    use_streaming: bool = False
+    streaming_window_size: int = 512      # tokens per chunk
+    streaming_overlap: int = 64           # overlap between chunks
+
+    # Hyper-Network: instant in-context weight adaptation
+    use_hyper_net: bool = False
+    hyper_rank: int = 4                   # LoRA rank for weight deltas
+    hyper_z_dim: int = 64                 # context embedding dimension
+    hyper_scale: float = 0.02             # ΔW magnitude scale
+
     @property
     def n_motifs(self) -> int:
         return len(self.motifs)
