@@ -6,10 +6,18 @@ Multi-objective loss for the NFN — Back-Propagation Through Phase (BPTP).
       + λ_freq     · L_freq      (sinusoidal amplitude sparsity)
       + λ_spectral · L_spectral  (Jacobian Frobenius — spectral stability)
 
+AGI v4.0 adds:
+      + λ_causal   · L_causal    (DAG sparsity across blocks)
+      + λ_goal     · L_goal      (phase-goal alignment)
+      + λ_coherence· L_coherence (cross-modal phase coherence)
+      + λ_ponder   · L_ponder    (ACT halting efficiency)
+      + λ_pred     · L_pred      (predictive coding error)
+      + λ_fe       · L_fe        (free energy / ELBO)
+
 All regularisation terms are differentiable and computed in a single pass.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -102,3 +110,44 @@ class NFNLoss:
             targets.reshape(B * L),
             ignore_index=ignore_index,
         )
+
+
+class AGILoss:
+    """
+    Full AGI v4.0 loss aggregator.
+
+    Combines all loss signals from AGINFNModel.forward() into a single
+    weighted scalar with per-component tracking for logging.
+
+    Usage:
+        criterion = AGILoss(cfg)
+        loss, breakdown = criterion(model_losses)
+        loss.backward()
+    """
+
+    def __init__(self, cfg: NFNConfig):
+        self.cfg = cfg
+
+    def __call__(
+        self,
+        model_losses: Dict[str, torch.Tensor],
+    ) -> tuple:
+        """Returns (total_loss, breakdown_dict)."""
+        device = next(iter(model_losses.values())).device
+        breakdown: Dict[str, torch.Tensor] = {}
+
+        keys = ("lm", "causal", "goal", "coherence", "ponder", "pred", "free_energy", "consistency")
+        for k in keys:
+            breakdown[k] = model_losses.get(k, torch.tensor(0.0, device=device))
+
+        total = sum(breakdown.values())
+        breakdown["total"] = total
+        return total, breakdown
+
+    @staticmethod
+    def log_breakdown(breakdown: Dict[str, torch.Tensor], step: int, prefix: str = "train") -> str:
+        parts = [f"step={step}"]
+        for k, v in breakdown.items():
+            if abs(v.item()) > 1e-8:
+                parts.append(f"{prefix}/{k}={v.item():.4f}")
+        return "  ".join(parts)

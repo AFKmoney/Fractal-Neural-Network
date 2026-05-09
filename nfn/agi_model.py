@@ -1,25 +1,19 @@
 """
 NFN v4.0 — AGINFNModel
 
-Full AGI language model stack integrating all v4.0 components:
+Full AGI language model stack:
 
   Token → AnalyticEmbedding
-       → AGIBlock × n_blocks  (memory + causal + goal + phase)
-       → [MultimodalFractalRFF]  (optional cross-modal fusion)
+       → [PredictiveCodingBlock wrapping AGIBlock] × n_blocks
+       → [MultimodalFractalRFF]
        → BayesianZipfianDecoder / ZipfianDecoder
        → Logits [B, L, V]
 
-Losses returned per forward pass:
-  "lm"        : primary language model cross-entropy
-  "causal"    : DAG sparsity (sum over blocks)
-  "goal"      : phase-goal alignment (sum over blocks)
-  "coherence" : cross-modal phase coherence (if multimodal)
-  "total"     : weighted sum of all above
-
-Generation:
-  model.generate(input_ids, max_new_tokens, ...)
-  Supports greedy, top-k, top-p, and temperature sampling.
-  Goal-directed generation: call model.set_goal(prompt_ids) first.
+New in this version:
+  • RecursiveReasoner wraps any block for ACT variable-depth thinking
+  • PredictiveCodingBlock wires top-down prediction errors between blocks
+  • think(prompt) runs extra reasoning rounds before generating
+  • Full loss dict: lm + causal + goal + coherence + ponder + pred + fe + consistency
 """
 
 import math
@@ -33,11 +27,9 @@ from .config import NFNConfig
 from .agi_block import AGIBlock
 from .hopfield import BayesianZipfianDecoder, ZipfianDecoder
 from .analytic_embed import AnalyticTokenEmbedding
+from .reasoning import RecursiveReasoner
+from .predictive import PredictiveCodingBlock
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Optional multimodal import  (only if use_multimodal=True)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _try_import_multimodal():
     try:
@@ -53,14 +45,14 @@ def _try_import_multimodal():
 
 class AGINFNModel(nn.Module):
     """
-    Full NFN v4.0 AGI language model.
+    NFN v4.0 full AGI language model.
 
-    Differences from EfficientNFNLM (v3.2):
-      • Each block is an AGIBlock (adds memory, causal DAG, goal forcing)
-      • BayesianZipfianDecoder with condensate-derived uncertainty
-      • Optional MultimodalFractalRFF for image/audio fusion
-      • Goal-directed generation API (set_goal / reset_goal)
-      • Richer loss dict from forward()
+    Each block is optionally wrapped in:
+      • RecursiveReasoner  — variable-depth ACT thinking per position
+      • PredictiveCodingBlock — top-down prediction errors between layers
+
+    These wrappers are transparent: the block still receives h and returns
+    (h, losses), the wrappers add ponder / pred losses on top.
     """
 
     def __init__(self, cfg: NFNConfig):
@@ -70,15 +62,44 @@ class AGINFNModel(nn.Module):
         # ── Embedding ──────────────────────────────────────────────────────
         self.embed = AnalyticTokenEmbedding(cfg.vocab_size, cfg.d_model)
 
-        # ── AGI Blocks ─────────────────────────────────────────────────────
-        self.blocks = nn.ModuleList([
-            AGIBlock(cfg, block_idx=i) for i in range(cfg.n_blocks)
-        ])
+        # ── Build blocks with optional wrappers ────────────────────────────
+        raw_blocks = [AGIBlock(cfg, block_idx=i) for i in range(cfg.n_blocks)]
 
-        # ── Final LayerNorm ────────────────────────────────────────────────
+        # Wrap with predictive coding first (inter-block prediction errors)
+        if cfg.use_predictive_coding:
+            pc_blocks = [
+                PredictiveCodingBlock(
+                    d_model     = cfg.d_model,
+                    block       = b,
+                    error_scale = cfg.pc_error_scale,
+                    lambda_pred = cfg.lambda_pred,
+                )
+                for b in raw_blocks
+            ]
+        else:
+            pc_blocks = raw_blocks
+
+        # Wrap with recursive reasoner (ACT variable-depth thinking)
+        if cfg.use_recursive_reasoning:
+            self.reasoner = RecursiveReasoner(
+                d_model            = cfg.d_model,
+                max_steps          = cfg.reasoning_max_steps,
+                halt_threshold     = cfg.reasoning_halt_threshold,
+                halt_on_alignment  = cfg.reasoning_halt_on_alignment,
+                lambda_ponder      = cfg.lambda_ponder,
+            )
+        else:
+            self.reasoner = None
+
+        self.blocks = nn.ModuleList(pc_blocks)
+
+        # Keep references to the raw AGIBlocks for goal/memory management
+        self._agi_blocks: List[AGIBlock] = raw_blocks
+
+        # ── Final norm ─────────────────────────────────────────────────────
         self.ln_f = nn.LayerNorm(cfg.d_model)
 
-        # ── Decoder head ───────────────────────────────────────────────────
+        # ── Decoder ────────────────────────────────────────────────────────
         if cfg.use_bayesian_decoder:
             self.lm_head = BayesianZipfianDecoder(
                 in_dim              = cfg.d_model,
@@ -93,73 +114,85 @@ class AGINFNModel(nn.Module):
                 alpha      = cfg.nfmc_zipf_alpha,
             )
 
-        # ── Multimodal fusion (optional) ───────────────────────────────────
+        # ── Multimodal fusion ──────────────────────────────────────────────
         self.multimodal: Optional[nn.Module] = None
         if cfg.use_multimodal:
-            MultimodalFractalRFF = _try_import_multimodal()
-            if MultimodalFractalRFF is not None:
-                self.multimodal = MultimodalFractalRFF(
-                    d_shared    = cfg.d_model,
-                    d_text      = cfg.d_model,
-                    d_image     = cfg.multimodal_d_image,
-                    d_audio     = cfg.multimodal_d_audio,
-                    patch_hw    = (cfg.multimodal_patch_h, cfg.multimodal_patch_w),
-                    n_rff       = cfg.nfmc_n_rff,
-                    rank        = cfg.nfmc_rank,
-                    n_phases    = cfg.nfmc_n_phases,
+            MMClass = _try_import_multimodal()
+            if MMClass is not None:
+                self.multimodal = MMClass(
+                    d_shared = cfg.d_model,
+                    d_text   = cfg.d_model,
+                    d_image  = cfg.multimodal_d_image,
+                    d_audio  = cfg.multimodal_d_audio,
+                    patch_hw = (cfg.multimodal_patch_h, cfg.multimodal_patch_w),
+                    n_rff    = cfg.nfmc_n_rff,
+                    rank     = cfg.nfmc_rank,
+                    n_phases = cfg.nfmc_n_phases,
                 )
 
     # ─── goal management ──────────────────────────────────────────────────────
 
     def set_goal(self, prompt_ids: torch.Tensor):
-        """
-        Encode the prompt into a goal phase and store it in all blocks.
-        Call once before starting a constrained generation episode.
-
-        prompt_ids: [B, L_prompt]
-        """
+        """Encode prompt → goal phase, store in all blocks."""
         with torch.no_grad():
             h = self.embed(prompt_ids)
-            for block in self.blocks:
+            for block in self._agi_blocks:
                 block.set_goal(h)
                 h, _ = block(h, write_memory=False)
 
     def reset_goal(self):
-        """Clear goal state in all blocks between generation episodes."""
-        for block in self.blocks:
+        for block in self._agi_blocks:
             block.reset_goal()
 
     def reset_memory(self):
-        """Reset episodic memory across all blocks."""
-        for block in self.blocks:
+        for block in self._agi_blocks:
             if block.memory is not None:
                 block.memory.reset()
+            if block.working_mem is not None:
+                block.working_mem.reset()
+
+    # ─── think()  — extra reasoning rounds before generation ─────────────────
+
+    @torch.no_grad()
+    def think(self, input_ids: torch.Tensor, n_rounds: int = 3) -> torch.Tensor:
+        """
+        Run n_rounds of reasoning over the prompt without generating tokens.
+        Updates working memory and episodic memory in-place.
+        Returns the final hidden state [B, L, d] after thinking.
+
+        Call this before generate() on hard problems.
+        """
+        h = self.embed(input_ids)
+        for _ in range(n_rounds):
+            for block in self.blocks:
+                if isinstance(block, PredictiveCodingBlock):
+                    h, _ = block(h, write_memory=True)
+                else:
+                    h, _ = block(h, write_memory=True)
+        return self.ln_f(h)
 
     # ─── forward ──────────────────────────────────────────────────────────────
 
     def forward(
         self,
-        input_ids:    torch.Tensor,                    # [B, L]
-        targets:      Optional[torch.Tensor]  = None,  # [B, L]
-        image:        Optional[torch.Tensor]  = None,  # [B, n_patches, d_image]
-        audio:        Optional[torch.Tensor]  = None,  # [B, n_frames, d_audio]
-        mask:         Optional[torch.Tensor]  = None,  # [B, L] attention mask
+        input_ids:    torch.Tensor,
+        targets:      Optional[torch.Tensor] = None,
+        image:        Optional[torch.Tensor] = None,
+        audio:        Optional[torch.Tensor] = None,
+        mask:         Optional[torch.Tensor] = None,
         write_memory: bool = True,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        Returns:
-          logits : [B, L, vocab_size]
-          losses : dict with keys "lm", "causal", "goal", "coherence", "total"
+        Returns (logits [B, L, V], losses dict).
         """
-        h = self.embed(input_ids)   # [B, L, d_model]
+        h = self.embed(input_ids)
 
         losses: Dict[str, torch.Tensor] = {
-            "causal":    torch.tensor(0.0, device=h.device),
-            "goal":      torch.tensor(0.0, device=h.device),
-            "coherence": torch.tensor(0.0, device=h.device),
+            k: torch.tensor(0.0, device=h.device)
+            for k in ("causal", "goal", "coherence", "ponder", "pred", "free_energy", "consistency")
         }
 
-        # ── Multimodal fusion (before blocks) ─────────────────────────────
+        # ── Multimodal fusion ──────────────────────────────────────────────
         if self.multimodal is not None and (image is not None or audio is not None):
             modal_out = self.multimodal(text=h, image=image, audio=audio)
             h = modal_out["text"]
@@ -167,25 +200,61 @@ class AGINFNModel(nn.Module):
                 self.multimodal.loss_coherence() * self.cfg.lambda_coherence
             )
 
-        # ── AGI Blocks ─────────────────────────────────────────────────────
+        # ── Blocks (with optional RecursiveReasoner) ───────────────────────
+        prev_prediction = None   # for predictive coding top-down pass
+
         for block in self.blocks:
-            h, block_losses = block(h, mask=mask, write_memory=write_memory)
-            for k, v in block_losses.items():
-                if k in losses:
-                    losses[k] = losses[k] + v
+            if self.reasoner is not None:
+                # ACT: run block multiple times, halt adaptively
+                def _block_call(h_in):
+                    if isinstance(block, PredictiveCodingBlock):
+                        h_out, _ = block(h_in, prediction_above=prev_prediction,
+                                         write_memory=write_memory)
+                    else:
+                        h_out, _ = block(h_in, write_memory=write_memory)
+                    return h_out, {}
+
+                # Get goal alignment for this block (if available)
+                goal_alignment = None
+                raw_block = block.block if isinstance(block, PredictiveCodingBlock) else block
+                if hasattr(raw_block, 'goal') and raw_block.goal is not None:
+                    if raw_block.goal._goal_phase is not None:
+                        d = h.shape[-1]
+                        half = min(self.cfg.goal_n_phases, d // 2)
+                        phase_proxy = torch.atan2(h[..., :half], h[..., half:half*2] + 1e-6)
+                        if half < self.cfg.goal_n_phases:
+                            pad = torch.zeros(*phase_proxy.shape[:-1],
+                                              self.cfg.goal_n_phases - half, device=h.device)
+                            phase_proxy = torch.cat([phase_proxy, pad], dim=-1)
+                        _, goal_alignment = raw_block.goal(phase_proxy)
+
+                h, ponder_loss, _ = self.reasoner(h, _block_call, goal_alignment)
+                losses["ponder"] = losses["ponder"] + ponder_loss
+
+            else:
+                # Standard single pass
+                if isinstance(block, PredictiveCodingBlock):
+                    h, pred_loss = block(h, prediction_above=prev_prediction,
+                                         write_memory=write_memory)
+                    losses["pred"] = losses["pred"] + pred_loss
+                    prev_prediction = block.last_prediction
+                else:
+                    h, block_losses = block(h, mask=mask, write_memory=write_memory)
+                    for k, v in block_losses.items():
+                        if k in losses:
+                            losses[k] = losses[k] + v
 
         h = self.ln_f(h)
 
         # ── Decoder ────────────────────────────────────────────────────────
         if isinstance(self.lm_head, BayesianZipfianDecoder):
             logits = self.lm_head(
-                h,
-                sample_noise = self.cfg.bayesian_thompson_sampling and self.training,
+                h, sample_noise=self.cfg.bayesian_thompson_sampling and self.training
             )
         else:
-            logits = self.lm_head(h)   # [B, L, V]
+            logits = self.lm_head(h)
 
-        # ── Language model loss ────────────────────────────────────────────
+        # ── LM loss ────────────────────────────────────────────────────────
         if targets is not None:
             if isinstance(self.lm_head, BayesianZipfianDecoder):
                 losses["lm"] = self.lm_head.loss_calibration(logits, targets)
@@ -199,7 +268,6 @@ class AGINFNModel(nn.Module):
             losses["lm"] = torch.tensor(0.0, device=h.device)
 
         losses["total"] = sum(losses.values())
-
         return logits, losses
 
     # ─── generation ───────────────────────────────────────────────────────────
@@ -207,7 +275,7 @@ class AGINFNModel(nn.Module):
     @torch.no_grad()
     def generate(
         self,
-        input_ids:      torch.Tensor,           # [B, L]
+        input_ids:      torch.Tensor,
         max_new_tokens: int = 128,
         temperature:    float = 1.0,
         top_k:          int = 0,
@@ -215,78 +283,88 @@ class AGINFNModel(nn.Module):
         eos_token_id:   Optional[int] = None,
         image:          Optional[torch.Tensor] = None,
         audio:          Optional[torch.Tensor] = None,
+        think_rounds:   int = 0,
     ) -> torch.Tensor:
         """
-        Autoregressive generation.
-        Returns [B, L + max_new_tokens].
+        Autoregressive generation with optional thinking phase.
+
+        think_rounds > 0: run think() before generating to warm up
+        working memory and episodic memory with prompt context.
         """
+        if think_rounds > 0:
+            self.think(input_ids, n_rounds=think_rounds)
+
         ids = input_ids
         eos = eos_token_id if eos_token_id is not None else self.cfg.eos_token_id
+        first_step = True
 
         for _ in range(max_new_tokens):
-            # Only pass image/audio on first step (they're context, not per-token)
             logits, _ = self.forward(
                 ids,
-                image  = image if ids.shape[1] == input_ids.shape[1] else None,
-                audio  = audio if ids.shape[1] == input_ids.shape[1] else None,
+                image  = image if first_step else None,
+                audio  = audio if first_step else None,
                 write_memory = True,
             )
-            next_logits = logits[:, -1, :]   # [B, V]
+            first_step = False
+            next_logits = logits[:, -1, :]
 
             if temperature != 1.0:
                 next_logits = next_logits / max(temperature, 1e-5)
 
-            # Top-k filtering
             if top_k > 0:
-                topk_vals = torch.topk(next_logits, top_k).values[:, -1:]
-                next_logits = next_logits.masked_fill(next_logits < topk_vals, -1e9)
+                thresh = torch.topk(next_logits, top_k).values[:, -1:]
+                next_logits = next_logits.masked_fill(next_logits < thresh, -1e9)
 
-            # Top-p (nucleus) filtering
             if top_p < 1.0:
                 sorted_logits, sorted_idx = torch.sort(next_logits, descending=True)
                 cum_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
-                remove_mask = cum_probs - F.softmax(sorted_logits, dim=-1) > top_p
-                sorted_logits[remove_mask] = -1e9
+                remove = cum_probs - F.softmax(sorted_logits, dim=-1) > top_p
+                sorted_logits[remove] = -1e9
                 next_logits.scatter_(1, sorted_idx, sorted_logits)
 
-            probs = F.softmax(next_logits, dim=-1)
-            next_id = torch.multinomial(probs, num_samples=1)   # [B, 1]
-
-            ids = torch.cat([ids, next_id], dim=1)
+            probs  = F.softmax(next_logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+            ids    = torch.cat([ids, next_id], dim=1)
 
             if eos is not None and (next_id == eos).all():
                 break
 
         return ids
 
-    # ─── parameter count ──────────────────────────────────────────────────────
+    # ─── utilities ────────────────────────────────────────────────────────────
 
     def param_count(self) -> Dict[str, int]:
-        """Returns parameter counts by component."""
-        def count(m):
-            return sum(p.numel() for p in m.parameters())
-
+        def count(m): return sum(p.numel() for p in m.parameters())
         result = {
-            "embed":    count(self.embed),
-            "blocks":   count(self.blocks),
-            "ln_f":     count(self.ln_f),
-            "lm_head":  count(self.lm_head),
-            "total":    count(self),
+            "embed":   count(self.embed),
+            "blocks":  count(self.blocks),
+            "ln_f":    count(self.ln_f),
+            "lm_head": count(self.lm_head),
+            "total":   count(self),
         }
         if self.multimodal is not None:
             result["multimodal"] = count(self.multimodal)
         return result
 
     def __repr__(self) -> str:
-        pc = self.param_count()
+        pc   = self.param_count()
+        cfg  = self.cfg
+        mods = []
+        if cfg.use_episodic_memory:    mods.append("episodic+semantic memory")
+        if cfg.use_working_memory:     mods.append(f"working memory ({cfg.wm_n_slots} slots)")
+        if cfg.use_causal_graph:       mods.append("causal DAG")
+        if cfg.use_goal_predictor:     mods.append("goal forcing")
+        if cfg.use_recursive_reasoning:mods.append(f"ACT (max {cfg.reasoning_max_steps} steps)")
+        if cfg.use_predictive_coding:  mods.append("predictive coding")
+        if cfg.use_free_energy:        mods.append("free energy")
+        if cfg.use_self_consistency:   mods.append("self-consistency")
+        if cfg.use_plan_executor:      mods.append(f"planner ({cfg.plan_n_subgoals} sub-goals)")
+        if cfg.use_bayesian_decoder:   mods.append("bayesian decoder")
+        if cfg.use_multimodal:         mods.append("multimodal")
         return (
             f"AGINFNModel(\n"
-            f"  vocab={self.cfg.vocab_size}, d={self.cfg.d_model}, "
-            f"blocks={self.cfg.n_blocks}\n"
-            f"  memory={self.cfg.use_episodic_memory}, "
-            f"causal={self.cfg.use_causal_graph}, "
-            f"goal={self.cfg.use_goal_predictor}, "
-            f"multimodal={self.cfg.use_multimodal}\n"
+            f"  vocab={cfg.vocab_size}  d={cfg.d_model}  blocks={cfg.n_blocks}\n"
+            f"  modules: {', '.join(mods) or 'none'}\n"
             f"  params={pc['total']:,}\n"
             f")"
         )
@@ -297,29 +375,42 @@ class AGINFNModel(nn.Module):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_agi_model(
-    vocab_size: int,
-    d_model: int = 256,
-    n_blocks: int = 4,
-    use_memory: bool = True,
-    use_causal: bool = True,
-    use_goal: bool = True,
-    use_bayesian: bool = True,
+    vocab_size:             int,
+    d_model:                int   = 256,
+    n_blocks:               int   = 4,
+    use_memory:             bool  = True,
+    use_working_memory:     bool  = True,
+    use_causal:             bool  = True,
+    use_goal:               bool  = True,
+    use_reasoning:          bool  = True,
+    use_predictive_coding:  bool  = True,
+    use_free_energy:        bool  = True,
+    use_self_consistency:   bool  = True,
+    use_plan_executor:      bool  = True,
+    use_bayesian:           bool  = True,
     **kwargs,
 ) -> AGINFNModel:
     """
-    Quick builder for AGINFNModel with sensible defaults.
+    One-call builder for a fully-equipped AGINFNModel.
 
     Example:
         model = build_agi_model(vocab_size=32000, d_model=512, n_blocks=8)
+        print(model)
     """
     cfg = NFNConfig(
-        vocab_size           = vocab_size,
-        d_model              = d_model,
-        n_blocks             = n_blocks,
-        use_episodic_memory  = use_memory,
-        use_causal_graph     = use_causal,
-        use_goal_predictor   = use_goal,
-        use_bayesian_decoder = use_bayesian,
+        vocab_size              = vocab_size,
+        d_model                 = d_model,
+        n_blocks                = n_blocks,
+        use_episodic_memory     = use_memory,
+        use_working_memory      = use_working_memory,
+        use_causal_graph        = use_causal,
+        use_goal_predictor      = use_goal,
+        use_recursive_reasoning = use_reasoning,
+        use_predictive_coding   = use_predictive_coding,
+        use_free_energy         = use_free_energy,
+        use_self_consistency    = use_self_consistency,
+        use_plan_executor       = use_plan_executor,
+        use_bayesian_decoder    = use_bayesian,
         **kwargs,
     )
     return AGINFNModel(cfg)

@@ -122,6 +122,38 @@ class NFNConfig:
     bayesian_uncertainty_beta: float = 0.1   # uncertainty penalty at inference
     bayesian_thompson_sampling: bool = False # enable Thompson sampling in train
 
+    # ── AGI v4.0 — Differentiable Working Memory ───────────────────────────
+    use_working_memory: bool = False
+    wm_n_slots: int = 32                     # scratchpad capacity
+    wm_n_heads: int = 4                      # addressing heads
+    wm_sharpness: float = 3.0               # read/write sharpness
+
+    # ── AGI v4.0 — Recursive Reasoning (ACT) ─────────────────────────────
+    use_recursive_reasoning: bool = False
+    reasoning_max_steps: int = 8
+    reasoning_halt_threshold: float = 0.99
+    reasoning_halt_on_alignment: float = 0.85
+    lambda_ponder: float = 0.01
+
+    # ── AGI v4.0 — Predictive Coding ──────────────────────────────────────
+    use_predictive_coding: bool = False
+    pc_error_scale: float = 0.1
+    lambda_pred: float = 0.01
+
+    # ── AGI v4.0 — Free Energy Minimisation ───────────────────────────────
+    use_free_energy: bool = False
+    fe_latent_dim: int = 64
+    lambda_fe: float = 0.001
+
+    # ── AGI v4.0 — Self-Consistency ───────────────────────────────────────
+    use_self_consistency: bool = False
+    sc_n_candidates: int = 3
+    sc_noise_scale: float = 0.05
+
+    # ── AGI v4.0 — Plan Executor ──────────────────────────────────────────
+    use_plan_executor: bool = False
+    plan_n_subgoals: int = 4
+
     @property
     def n_motifs(self) -> int:
         return len(self.motifs)

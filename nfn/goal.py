@@ -65,7 +65,9 @@ class GoalEncoder(nn.Module):
         # Mandelbrot base angles (fixed prior — seed the goal space with natural frequencies)
         from .hopfield import mandelbrot_frequencies
         freqs = mandelbrot_frequencies(n_phases)
-        base  = torch.tensor(freqs[:n_phases], dtype=torch.float32)
+        raw   = freqs[:n_phases]
+        base  = raw.clone().detach().float() if isinstance(raw, torch.Tensor) \
+                else torch.tensor(raw, dtype=torch.float32)
         self.register_buffer("base_angles", base)
 
         # Goal projection

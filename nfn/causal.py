@@ -204,9 +204,14 @@ class CausalGraphLayer(nn.Module):
 
         # If no slots provided, derive them from h via pooling
         if slots is None:
-            chunk = max(1, L // self.n_slots)
-            padded = F.pad(h, (0, 0, 0, (self.n_slots * chunk - L) % chunk))
-            slots = padded[:, :self.n_slots * chunk].reshape(B, self.n_slots, chunk, d).mean(2)
+            if L < self.n_slots:
+                # Sequence shorter than n_slots — pad then pool
+                padded = F.pad(h, (0, 0, 0, self.n_slots - L))   # [B, n_slots, d]
+                slots = padded
+            else:
+                chunk  = L // self.n_slots
+                keep   = chunk * self.n_slots
+                slots  = h[:, :keep].reshape(B, self.n_slots, chunk, d).mean(2)
 
         slots = self.slot_proj(slots)            # [B, n_slots, d]
 
@@ -233,10 +238,12 @@ class CausalGraphLayer(nn.Module):
         set to `value`? (do-calculus intervention)
         """
         B, L, d = h.shape
-        chunk  = max(1, L // self.n_slots)
-        padded = F.pad(h, (0, 0, 0, (self.n_slots * chunk - L) % chunk))
-        slots  = padded[:, :self.n_slots * chunk].reshape(B, self.n_slots, chunk, d).mean(2)
-        slots  = self.slot_proj(slots)
+        if L < self.n_slots:
+            slots = F.pad(h, (0, 0, 0, self.n_slots - L))
+        else:
+            chunk = L // self.n_slots
+            slots = h[:, :chunk * self.n_slots].reshape(B, self.n_slots, chunk, d).mean(2)
+        slots = self.slot_proj(slots)
 
         A, _ = self.edge_net(slots)
         slots_intervened = self.propagator.intervene(slots, A, slot_idx, value)

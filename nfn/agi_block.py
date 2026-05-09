@@ -1,26 +1,29 @@
 """
 NFN v4.0 — AGIBlock
 
-Wraps EfficientNFNBlock with all AGI v4.0 modules:
+Full AGI-capable transformer block. Wraps EfficientNFNBlock with:
 
   ┌─────────────────────────────────────────────────────────────────┐
-  │  h  ─► EfficientNFNBlock (linear attn + phase soliton + MoE)   │
-  │         │                                                        │
-  │         ├─► TwoTierMemory  (episodic ring + semantic condensate) │
-  │         │        ↕ read / write                                  │
-  │         ├─► CausalGraphLayer  (DAG over memory slots)           │
-  │         │        ↕ SCM propagation + do-calculus                 │
-  │         ├─► PhaseGoalPredictor  (λ·sin(θ*−θ) forcing)          │
-  │         │        ↕ goal attraction + alignment loss              │
-  │         └─► BayesianZipfianDecoder  (uncertainty-calibrated LM) │
+  │  h_in                                                           │
+  │   ├─► [FreeEnergyMinimiser]     belief state compression        │
+  │   │                                                             │
+  │   ├─► EfficientNFNBlock         linear attn + soliton + MoE     │
+  │   │                                                             │
+  │   ├─► [TwoTierMemory]           episodic ring + semantic SVD    │
+  │   │                                                             │
+  │   ├─► [FractalWorkingMemory]    differentiable scratchpad       │
+  │   │                                                             │
+  │   ├─► [CausalGraphLayer]        DAG + do-calculus               │
+  │   │                                                             │
+  │   ├─► [PhaseGoalPredictor]      λ·sin(θ*−θ) Kuramoto forcing   │
+  │   │                                                             │
+  │   └─► [SelfConsistencyCheck]    internal debate → best cand.   │
+  │                                                                  │
+  │  h_out  (fused residual of all active streams)                  │
   └─────────────────────────────────────────────────────────────────┘
 
-Losses aggregated from all sub-modules and returned as a dict:
-  "lm"      : cross-entropy language model loss
-  "phase"   : EfficientNFNBlock internal phase coherence
-  "causal"  : DAG sparsity
-  "goal"    : phase-goal alignment
-  "coherence": optional cross-modal coherence
+All modules are opt-in via NFNConfig flags — the block degrades
+gracefully to a plain EfficientNFNBlock when all flags are False.
 """
 
 from typing import Dict, Optional, Tuple
@@ -32,36 +35,35 @@ import torch.nn.functional as F
 from .config import NFNConfig
 from .efficient_block import EfficientNFNBlock
 from .episodic_memory import TwoTierMemory
+from .working_memory import FractalWorkingMemory
 from .causal import CausalGraphLayer
 from .goal import PhaseGoalPredictor
 from .hopfield import BayesianZipfianDecoder
+from .reasoning import SelfConsistencyCheck, PlanExecutor
+from .predictive import FreeEnergyMinimiser
 
 
 class AGIBlock(nn.Module):
-    """
-    Single AGI-capable transformer block.
-
-    Can be stacked N times in AGINFNModel.  Each block shares the same
-    TwoTierMemory and CausalGraphLayer (cross-block memory) but has its own
-    EfficientNFNBlock, PhaseGoalPredictor, and output projection.
-
-    The PhaseGoalPredictor is applied to the *phase* output of EfficientNFNBlock
-    (if the block exposes it), or derived from the hidden state.
-    """
 
     def __init__(self, cfg: NFNConfig, block_idx: int = 0):
         super().__init__()
         self.cfg       = cfg
         self.block_idx = block_idx
+        d = cfg.d_model
 
         # ── Core sequence mixer ───────────────────────────────────────────
         self.core = EfficientNFNBlock(cfg)
 
-        # ── AGI modules (conditionally enabled) ───────────────────────────
+        # ── Free Energy (belief compression, runs before core) ────────────
+        self.free_energy: Optional[FreeEnergyMinimiser] = None
+        if cfg.use_free_energy:
+            self.free_energy = FreeEnergyMinimiser(d, cfg.fe_latent_dim, cfg.lambda_fe)
+
+        # ── Two-Tier Memory ───────────────────────────────────────────────
         self.memory: Optional[TwoTierMemory] = None
         if cfg.use_episodic_memory:
             self.memory = TwoTierMemory(
-                d_model             = cfg.d_model,
+                d_model             = d,
                 episodic_capacity   = cfg.episodic_capacity,
                 episodic_key_dim    = cfg.episodic_key_dim,
                 episodic_n_read     = cfg.episodic_n_read,
@@ -70,125 +72,166 @@ class AGIBlock(nn.Module):
                 consolidation_every = cfg.consolidation_every,
             )
 
+        # ── Differentiable Working Memory ─────────────────────────────────
+        self.working_mem: Optional[FractalWorkingMemory] = None
+        if cfg.use_working_memory:
+            self.working_mem = FractalWorkingMemory(
+                d_model   = d,
+                n_slots   = cfg.wm_n_slots,
+                n_heads   = cfg.wm_n_heads,
+                sharpness = cfg.wm_sharpness,
+            )
+
+        # ── Causal Graph Layer ────────────────────────────────────────────
         self.causal: Optional[CausalGraphLayer] = None
         if cfg.use_causal_graph:
             self.causal = CausalGraphLayer(
-                d_model  = cfg.d_model,
+                d_model  = d,
                 n_slots  = cfg.causal_n_slots,
                 hidden   = cfg.causal_hidden,
                 sparsity = cfg.causal_sparsity,
             )
 
+        # ── Goal-Directed Phase Forcing ───────────────────────────────────
         self.goal: Optional[PhaseGoalPredictor] = None
         if cfg.use_goal_predictor:
             self.goal = PhaseGoalPredictor(
-                d_model     = cfg.d_model,
+                d_model     = d,
                 n_phases    = cfg.goal_n_phases,
                 init_lambda = cfg.goal_init_lambda,
                 n_steps     = cfg.goal_n_steps,
             )
 
-        # Residual gate for combining AGI enrichments with core output
-        n_streams = 1  # core always present
-        if cfg.use_episodic_memory: n_streams += 1
-        if cfg.use_causal_graph:    n_streams += 1
-        self.fusion = nn.Linear(cfg.d_model * n_streams, cfg.d_model, bias=False)
-        nn.init.zeros_(self.fusion.weight)  # start as passthrough of core
+        # ── Self-Consistency Check ────────────────────────────────────────
+        self.consistency: Optional[SelfConsistencyCheck] = None
+        if cfg.use_self_consistency:
+            self.consistency = SelfConsistencyCheck(
+                d_model      = d,
+                n_candidates = cfg.sc_n_candidates,
+                noise_scale  = cfg.sc_noise_scale,
+            )
 
-    # ─── goal management ──────────────────────────────────────────────────────
+        # ── Plan Executor ─────────────────────────────────────────────────
+        self.planner: Optional[PlanExecutor] = None
+        if cfg.use_plan_executor and cfg.use_goal_predictor:
+            self.planner = PlanExecutor(cfg.goal_n_phases, cfg.plan_n_subgoals)
+
+        # ── Stream fusion ─────────────────────────────────────────────────
+        n_streams = 1
+        if cfg.use_episodic_memory: n_streams += 1
+        if cfg.use_working_memory:  n_streams += 1
+        self.fusion = nn.Linear(d * n_streams, d, bias=False)
+        nn.init.zeros_(self.fusion.weight)
+
+    # ─── goal / plan management ──────────────────────────────────────────────
 
     def set_goal(self, h_prompt: torch.Tensor):
-        """Set generation goal from prompt hidden states."""
         if self.goal is not None:
             self.goal.set_goal(h_prompt)
+            if self.planner is not None:
+                self.planner.set_plan(self.goal._goal_phase)
 
     def reset_goal(self):
         if self.goal is not None:
             self.goal.reset_goal()
+        if self.planner is not None:
+            self.planner.reset()
+
+    def reset_working_memory(self):
+        if self.working_mem is not None:
+            self.working_mem.reset()
 
     # ─── forward ──────────────────────────────────────────────────────────────
 
     def forward(
         self,
-        h:              torch.Tensor,                   # [B, L, d]
-        mask:           Optional[torch.Tensor] = None,  # [B, L] attention mask
-        write_memory:   bool = True,
+        h:            torch.Tensor,
+        mask:         Optional[torch.Tensor] = None,
+        write_memory: bool = True,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        Returns:
-          h_out   : [B, L, d]
-          losses  : dict of scalar auxiliary losses
+        Returns (h_out [B, L, d], losses dict).
         """
         losses: Dict[str, torch.Tensor] = {}
-        streams = []
 
-        # ── 1. Core EfficientNFNBlock ──────────────────────────────────────
+        # ── 1. Free Energy — belief compression before core ───────────────
+        if self.free_energy is not None:
+            h, fe_loss = self.free_energy(h)
+            losses["free_energy"] = losses.get("free_energy", 0.0) + fe_loss
+
+        # ── 2. Core EfficientNFNBlock ──────────────────────────────────────
         h_core = self.core(h)
-        streams.append(h_core)
+        streams = [h_core]
 
-        # ── 2. Two-Tier Memory ─────────────────────────────────────────────
+        # ── 3. Two-Tier Memory ─────────────────────────────────────────────
         if self.memory is not None:
             h_mem = self.memory(h_core, write=write_memory)
             streams.append(h_mem)
 
-        # ── 3. Causal Graph Layer ──────────────────────────────────────────
-        if self.causal is not None:
-            h_causal, loss_dag = self.causal(h_core)
-            losses["causal"] = loss_dag * self.cfg.lambda_causal
-        else:
-            h_causal = h_core
+        # ── 4. Working Memory ──────────────────────────────────────────────
+        if self.working_mem is not None:
+            h_wm = self.working_mem(h_core, write=write_memory)
+            streams.append(h_wm)
 
-        # ── 4. Goal-directed phase forcing ─────────────────────────────────
-        # Derive a phase proxy from h_causal (cos+sin of linear projection)
+        # ── 5. Fuse memory streams ─────────────────────────────────────────
+        if len(streams) > 1:
+            h_fused = self.fusion(torch.cat(streams, dim=-1))
+        else:
+            h_fused = h_core
+
+        # ── 6. Causal Graph ────────────────────────────────────────────────
+        if self.causal is not None:
+            h_fused, loss_dag = self.causal(h_fused)
+            losses["causal"] = losses.get("causal", 0.0) + loss_dag * self.cfg.lambda_causal
+
+        # ── 7. Goal Forcing ────────────────────────────────────────────────
         if self.goal is not None:
-            d = h_causal.shape[-1]
+            d = h_fused.shape[-1]
             half = min(self.cfg.goal_n_phases, d // 2)
             phase_proxy = torch.atan2(
-                h_causal[..., :half],
-                h_causal[..., half:half*2] + 1e-6,
-            )  # [B, L, half]
-            # Pad to goal_n_phases if needed
+                h_fused[..., :half],
+                h_fused[..., half:half * 2] + 1e-6,
+            )
             if half < self.cfg.goal_n_phases:
-                pad = torch.zeros(
-                    *phase_proxy.shape[:-1],
-                    self.cfg.goal_n_phases - half,
-                    device=h.device,
-                )
+                pad = torch.zeros(*phase_proxy.shape[:-1],
+                                  self.cfg.goal_n_phases - half, device=h.device)
                 phase_proxy = torch.cat([phase_proxy, pad], dim=-1)
 
+            # Use sub-goal if planner is active
+            if self.planner is not None:
+                subgoal = self.planner.current_subgoal(h.device)
+                if subgoal is not None:
+                    self.goal._goal_phase = subgoal
+
             theta_forced, alignment = self.goal(phase_proxy, h_context=h_core)
+            losses["goal"] = losses.get("goal", 0.0) + \
+                self.goal.loss_goal(phase_proxy) * self.cfg.lambda_goal
 
-            # Goal loss: encourage alignment
-            losses["goal"] = self.goal.loss_goal(phase_proxy) * self.cfg.lambda_goal
+            # Advance plan if alignment is high enough
+            if self.planner is not None:
+                self.planner.advance(alignment.mean(-1))
 
-            # Mix goal-forced signal back into h_causal via sin+cos features
             goal_feat = torch.cat([
-                torch.cos(theta_forced),
-                torch.sin(theta_forced),
-            ], dim=-1)[:, :, :d]  # [B, L, d] (truncate if needed)
-            h_causal = h_causal + goal_feat * 0.05
+                torch.cos(theta_forced), torch.sin(theta_forced)
+            ], dim=-1)                                          # [B, L, 2*n_phases]
+            # Pad or truncate to d_model
+            gf_d = goal_feat.shape[-1]
+            if gf_d < d:
+                goal_feat = F.pad(goal_feat, (0, d - gf_d))
+            elif gf_d > d:
+                goal_feat = goal_feat[..., :d]
+            h_fused = h_fused + goal_feat * 0.05
 
-        # ── 5. Fuse streams ────────────────────────────────────────────────
-        if len(streams) > 1:
-            h_out = self.fusion(torch.cat(streams, dim=-1))
-            h_out = h_causal + h_out   # residual from causal / goal on top
-        else:
-            h_out = h_causal
+        # ── 8. Self-Consistency ────────────────────────────────────────────
+        if self.consistency is not None:
+            h_fused, cons_loss = self.consistency(h_fused, self.causal)
+            losses["consistency"] = losses.get("consistency", 0.0) + cons_loss * 0.1
 
-        return h_out, losses
+        return h_fused, losses
 
     # ─── counterfactual reasoning ─────────────────────────────────────────────
 
-    def counterfactual(
-        self,
-        h:        torch.Tensor,  # [B, L, d]
-        slot_idx: int,
-        value:    torch.Tensor,  # [B, d]
-    ) -> torch.Tensor:
-        """
-        What would h look like if causal slot `slot_idx` were set to `value`?
-        Requires use_causal_graph=True.
-        """
+    def counterfactual(self, h: torch.Tensor, slot_idx: int, value: torch.Tensor) -> torch.Tensor:
         if self.causal is None:
             raise RuntimeError("use_causal_graph must be True for counterfactuals")
         return self.causal.causal_query(h, slot_idx, value)
