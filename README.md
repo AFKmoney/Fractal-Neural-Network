@@ -1,76 +1,72 @@
 # Neural Fractal Network (NFN)
 
-> **Lightweight Super-Intelligence via Condensed Multidimensional Fractal Kernel**  
-> *From fractal topology to language emergence — without massive training*
+> **Efficient language model architecture grounded in fractal geometry and phase dynamics**  
+> *Structured inductive biases that let small models punch above their weight*
 
 ---
 
 **Author:** Philippe-Antoine Robert  
-**Version:** 3.2 — Complete Architecture  
-**Date:** 2026-05-03 07:22:48 UTC  
+**Version:** 4.0 — AGI Module Stack  
 **License:** Proprietary — Philippe-Antoine Robert, all rights reserved
 
 ---
 
-## Vision
+## What NFN actually is
 
-> *"The universe is a condensed fractal network: it does not learn — it is."*  
-> — Philippe-Antoine Robert, 2026
+NFN is a language model architecture that replaces brute-force scale with structural priors:
 
-Current large language models (GPT-4, Gemini, Claude) are dense transformers that:
-- Cost **billions of dollars** to train
-- Require **thousands of GPUs** at inference
-- Scale at **O(L²)** complexity — doubling context = 4× more expensive
-- Have **zero structural prior** — everything learned by brute force
+- **Fractal multi-scale attention** — O(L·d²) linear attention over hierarchical token groups instead of O(L²)
+- **Kuramoto phase dynamics** — oscillator synchrony as a learned similarity measure, replacing softmax attention in the inner loop
+- **Analytic embedding** — zero-parameter token representation using Fourier + char-class geometry; warm-start without a learned embedding table
+- **Zipf-initialized decoder** — output head seeded to match the natural frequency distribution of language, converging faster from step 0
+- **Spectral condensate** — one-shot SVD compression of the fractal kernel, no gradient required; updated online via incremental SVD (Brand 2002)
 
-**NFN is the architectural counter-measure.** Its power lies in its geometry, not its parameter count.
+The AGI v4.0 module stack adds four capabilities that work together:
+
+| Module | What it does | Why it matters |
+|--------|-------------|----------------|
+| **TwoTierMemory** | Episodic ring-buffer (fast exact recall) + semantic SVD condensate (slow compressed knowledge) | Cross-context persistence without catastrophic forgetting |
+| **CausalGraphLayer** | Learns a lower-triangular DAG over memory slots; supports do-calculus hard interventions | Counterfactual reasoning: "what would change if X were different?" |
+| **PhaseGoalPredictor** | Adds λ·sin(θ\*−θ) forcing to Kuramoto dynamics; goal θ\* encoded from prompt | Steerable generation without RLHF |
+| **BayesianZipfianDecoder** | Logit uncertainty derived from condensate singular values S; Thompson sampling in training | Calibrated confidence; exploration without temperature hacks |
 
 ---
 
-## Architecture at a Glance
+## Architecture
 
 ```
-                    NFN Architecture v3.2
-    ┌─────────────────────────────────────────────────┐
-    │  Token Input [B, L]                             │
-    │       │                                         │
-    │  ┌────▼────────────────────────────────────┐    │
-    │  │  AnalyticTokenEmbedding  [0 params]     │    │
-    │  │  Fourier fractal + char-class geometry  │    │
-    │  └────────────────────────────────────────┘    │
-    │       │                                         │
-    │  ┌────▼────────────────────────────────────┐    │
-    │  │  NFNBlock × n_blocks  (v2.0)            │    │
-    │  │  ├─ FractalMemoryBank (persistent mem)  │    │
-    │  │  ├─ MotifBranch × n_motifs              │    │
-    │  │  │   ├─ SinusoidalAggregator × K        │    │
-    │  │  │   └─ KuramotoPhaseLayer × K          │    │
-    │  │  ├─ CausalSelfAttention (Flash+RoPE)    │    │
-    │  │  ├─ NFMCKernelLayer (v3.0, optional)    │    │
-    │  │  └─ TemporalRefinement × P              │    │
-    │  └────────────────────────────────────────┘    │
-    │       │  OR  EfficientNFNBlock × n_blocks       │
-    │  ┌────▼────────────────────────────────────┐    │
-    │  │  EfficientNFNBlock  (v3.2)              │    │
-    │  │  ├─ FractalLinearAttention  O(L·d²)     │    │
-    │  │  ├─ PhaseSoliton                        │    │
-    │  │  └─ PhaseRoutedMoE  (K/E experts)       │    │
-    │  └────────────────────────────────────────┘    │
-    │       │                                         │
-    │  ┌────▼────────────────────────────────────┐    │
-    │  │  NFMC Condensate Layer  (v3.0)          │    │
-    │  │  ├─ FractalRFF (fixed buffers)          │    │
-    │  │  ├─ SpectralCondensate (one-shot SVD)   │    │
-    │  │  └─ HelmholtzPhaseLocking               │    │
-    │  └────────────────────────────────────────┘    │
-    │       │                                         │
-    │  ┌────▼────────────────────────────────────┐    │
-    │  │  ZipfianDecoder / LMHead                │    │
-    │  │  Zipf-initialized — correct prior dist  │    │
-    │  └────────────────────────────────────────┘    │
-    │       │                                         │
-    │  Logits [B, L, V]                               │
-    └─────────────────────────────────────────────────┘
+NFN v4.0 — AGI Stack
+┌─────────────────────────────────────────────────┐
+│  Token Input [B, L]                             │
+│       │                                         │
+│  ┌────▼────────────────────────────────────┐    │
+│  │  AnalyticTokenEmbedding  [0 params]     │    │
+│  │  Fourier fractal + char-class geometry  │    │
+│  └────────────────────────────────────────┘    │
+│       │                                         │
+│  ┌────▼────────────────────────────────────┐    │
+│  │  AGIBlock × n_blocks                    │    │
+│  │  ├─ EfficientNFNBlock                   │    │
+│  │  │   ├─ FractalLinearAttention O(L·d²)  │    │
+│  │  │   ├─ PhaseSoliton                    │    │
+│  │  │   └─ PhaseRoutedMoE                  │    │
+│  │  ├─ TwoTierMemory (episodic + semantic) │    │
+│  │  ├─ CausalGraphLayer (DAG + do-calculus)│    │
+│  │  └─ PhaseGoalPredictor (λ·sin(θ*−θ))   │    │
+│  └────────────────────────────────────────┘    │
+│       │                                         │
+│  ┌────▼────────────────────────────────────┐    │
+│  │  [MultimodalFractalRFF]  (optional)     │    │
+│  │  Shared phase space: text/image/audio   │    │
+│  └────────────────────────────────────────┘    │
+│       │                                         │
+│  ┌────▼────────────────────────────────────┐    │
+│  │  BayesianZipfianDecoder                 │    │
+│  │  Uncertainty from condensate S values   │    │
+│  └────────────────────────────────────────┘    │
+│       │                                         │
+│  Logits [B, L, V]                               │
+└─────────────────────────────────────────────────┘
 ```
 
 ---
@@ -82,10 +78,10 @@ git clone <repo>
 cd flow
 pip install -e .
 
-# Optional: high-quality tokenizer
+# Optional: fast tokenizer
 pip install tiktoken
 
-# Optional: CUDA acceleration for Flash Attention
+# Optional: CUDA / Flash Attention
 pip install torch --extra-index-url https://download.pytorch.org/whl/cu121
 ```
 
@@ -93,36 +89,50 @@ pip install torch --extra-index-url https://download.pytorch.org/whl/cu121
 
 ## Quick Start
 
-### Inference in 5 lines
+### AGI model (v4.0)
+
+```python
+from nfn.agi_model import build_agi_model
+from nfn.tokenizer import load_tokenizer
+
+model = build_agi_model(
+    vocab_size  = 32000,
+    d_model     = 512,
+    n_blocks    = 8,
+    use_memory  = True,   # episodic + semantic memory
+    use_causal  = True,   # causal DAG + interventions
+    use_goal    = True,   # goal-directed generation
+    use_bayesian= True,   # calibrated uncertainty
+)
+tok = load_tokenizer()
+
+# Goal-directed generation
+model.set_goal(tok.encode("Write a step-by-step explanation"))
+out = model.generate(tok.encode("The key insight is"), max_new_tokens=200)
+print(tok.decode(out[0].tolist()))
+
+# Counterfactual reasoning
+h = model.blocks[0].counterfactual(hidden, slot_idx=3, value=alt_concept)
+```
+
+### NFMC condensate (zero-shot warm-start)
 
 ```python
 from nfn.config import NFNConfig
 from nfn.nfmc import ZeroShotNFMC
-from nfn.tokenizer import load_tokenizer
 
 cfg = NFNConfig(d_model=256, vocab_size=32000)
-model = ZeroShotNFMC(cfg)  # zero learned params in the embedding!
-tok = load_tokenizer()
-
-# One-shot condensation (no training, pure algebra)
+model = ZeroShotNFMC(cfg)
 model.condense_from_text(open("corpus.txt").read(), tok)
 
-# Generate
 out = model.generate(tok.encode("Hello"), max_new_tokens=100)
-print(tok.decode(out[0].tolist()))
 ```
 
-### Full training
+### Training
 
 ```bash
-# Train on CPU / single GPU
 python train.py --config configs/small.json --data corpus.txt
-
-# Multi-GPU (DDP, 4 GPUs)
 torchrun --nproc_per_node=4 train.py --config configs/medium.json --distributed ddp
-
-# Multi-GPU (FSDP, large models)
-torchrun --nproc_per_node=8 train.py --config configs/large.json --distributed fsdp
 ```
 
 ### Web interface
@@ -130,43 +140,20 @@ torchrun --nproc_per_node=8 train.py --config configs/large.json --distributed f
 ```bash
 python run.py --config configs/small.json
 # → http://localhost:8000
-# Tabs: Chat | Code | Agent
-# API: /api/chat, /api/generate, /api/condense, /api/memory/reset
 ```
 
 ---
 
-## Available Models
+## Efficiency
 
-| Config | Params | Context | RAM | Use case |
-|--------|--------|---------|-----|----------|
-| `nano.json` | ~2M | 4K | 1 GB | Testing, prototyping |
-| `small.json` | ~15M | 32K | 4 GB | Short-text training |
-| `medium.json` | ~85M | 128K | 16 GB | Light production |
-| `large.json` | ~400M | 128K | 40 GB | Production with NFMC v3.0 |
-
----
-
-## Key Results
-
-### Computational efficiency (v3.2)
-
-| Metric | Dense Transformer | EfficientNFN v3.2 | Gain |
-|--------|-------------------|-------------------|------|
+| Metric | Dense Transformer | EfficientNFN v4.0 | Gain |
+|--------|-------------------|--------------------|------|
 | Attention FLOPs (L=512) | 33.6M | 8.4M | **4×** |
 | Attention FLOPs (L=4096) | 2.15B | 134M | **16×** |
 | Attention FLOPs (L=32768) | 137B | 537M | **255×** |
 | Embedding params | standard | **0** (analytic) | ∞ |
-| MoE expert balance | auxiliary loss required | **automatic** | ✓ |
-
-### Convergence (v3.1 vs baseline)
-
-| Model | Initial loss | After 100 steps | Δ |
-|-------|-------------|-----------------|---|
-| ZeroShotNFMC v3.1 | 5.96 | **1.47** | −75.3% |
-| Transformer baseline | 4.70 | 2.88 | −38.7% |
-
-→ **2× better convergence** from analytic priors (Mandelbrot + Zipf + Hopfield)
+| Catastrophic forgetting | full | **none** (SVD merge) | ✓ |
+| Cross-context memory | none | **episodic ring + semantic SVD** | ✓ |
 
 ---
 
@@ -174,54 +161,56 @@ python run.py --config configs/small.json
 
 ```
 flow/
-├── nfn/                     # Architecture core
-│   ├── config.py            # NFNConfig — all hyperparameters
-│   ├── network.py           # NFNLanguageModel v2.0 (full stack)
-│   ├── connections.py       # SinusoidalAggregator, SinusoidalBroadcast
-│   ├── topology.py          # Fractal topology (binary tree, Cantor)
-│   ├── rope.py              # RoPE + NTK long-context scaling
-│   ├── kv_cache.py          # Fractal KV-Cache O(1) per token
-│   ├── phase_ode.py         # Kuramoto ODE with differentiable RK4
-│   ├── memory.py            # Persistent cross-context memory
-│   ├── tokenizer.py         # 3-tier tokenizer (tiktoken/BPE/char)
-│   ├── condensate.py        # NFMC v3.0 — condensed fractal kernel
-│   ├── analytic_embed.py    # Zero-parameter analytic embedding v3.1
-│   ├── hopfield.py          # Modern Hopfield + Mandelbrot + Zipf v3.1
-│   ├── moe.py               # PhaseRoutedMoE + FractalLinearAttn v3.2
-│   ├── efficient_block.py   # EfficientNFNBlock + EfficientNFNLM v3.2
-│   └── nfmc.py              # NFMCLanguageModel + ZeroShotNFMC
+├── nfn/                      # Architecture core
+│   ├── config.py             # NFNConfig — all hyperparameters
+│   ├── analytic_embed.py     # Zero-parameter analytic embedding
+│   ├── condensate.py         # FractalRFF + SpectralCondensate + HelmholtzPhaseLocking
+│   ├── hopfield.py           # Hopfield memory + Mandelbrot priors + BayesianZipfianDecoder
+│   ├── moe.py                # PhaseRoutedMoE + FractalLinearAttention
+│   ├── efficient_block.py    # EfficientNFNBlock + EfficientNFNLM
+│   ├── episodic_memory.py    # TwoTierMemory (EpisodicStore + SemanticConsolidator)
+│   ├── causal.py             # CausalGraphLayer — DAG + do-calculus interventions
+│   ├── goal.py               # PhaseGoalPredictor — Kuramoto goal forcing
+│   ├── multimodal.py         # MultimodalFractalRFF — shared phase space
+│   ├── agi_block.py          # AGIBlock — full v4.0 block
+│   ├── agi_model.py          # AGINFNModel — complete AGI stack
+│   ├── network.py            # NFNLanguageModel v2.0
+│   ├── nfmc.py               # ZeroShotNFMC
+│   ├── rope.py               # RoPE + NTK long-context
+│   ├── kv_cache.py           # Fractal KV-Cache
+│   ├── memory.py             # Persistent working memory
+│   └── tokenizer.py          # 3-tier tokenizer
 ├── training/
-│   ├── trainer.py           # BPTP trainer (grad accum, torch.compile)
-│   ├── losses.py            # NFNLoss — L_task + L_phase + L_freq + L_spectral
-│   └── distributed.py       # DDP / FSDP multi-GPU
+│   ├── trainer.py            # Trainer (grad accum, torch.compile)
+│   ├── losses.py             # NFNLoss — LM + phase + freq + spectral
+│   └── distributed.py        # DDP / FSDP
 ├── inference/
-│   └── engine.py            # NFNInferenceEngine (streaming, beam, mirostat)
+│   └── engine.py             # Streaming, beam, mirostat
 ├── interface/
-│   ├── app.py               # FastAPI server + WebSocket streaming
-│   └── agents.py            # Chat / Code / Reasoning agents
-├── docs/                    # Full technical documentation (French)
-│   ├── ARCHITECTURE.md      # Complete mathematical formalism
-│   ├── API.md               # Python & HTTP API reference
-│   ├── THEORY.md            # Theoretical foundations
-│   └── CHANGELOG.md         # Version history
-├── configs/                 # JSON presets (nano/small/medium/large)
-├── examples/                # Example scripts
-├── train.py                 # Training CLI
-└── run.py                   # Web server CLI
+│   ├── app.py                # FastAPI + WebSocket
+│   └── agents.py             # Chat / Code / Reasoning agents
+├── docs/
+│   ├── ARCHITECTURE.md       # Mathematical formalism
+│   ├── API.md                # API reference
+│   ├── THEORY.md             # Theoretical foundations
+│   └── CHANGELOG.md          # Version history
+├── configs/                  # nano / small / medium / large
+├── train.py
+└── run.py
 ```
 
 ---
 
 ## Documentation
 
-| Document | Language | Description |
-|----------|----------|-------------|
-| **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** | EN | Complete mathematical formalism for every component |
-| **[docs/API.md](docs/API.md)** | EN | Full Python & HTTP API reference with examples |
-| **[docs/THEORY.md](docs/THEORY.md)** | EN | Theoretical foundations: fractals, Kuramoto, NFMC, Zipf |
-| **[docs/CHANGELOG.md](docs/CHANGELOG.md)** | EN | Full version history v1.0 → v3.2 |
+| Document | Description |
+|----------|-------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Mathematical formalism for every component |
+| [docs/API.md](docs/API.md) | Python & HTTP API reference |
+| [docs/THEORY.md](docs/THEORY.md) | Fractal kernels, Kuramoto, NFMC, Zipf |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Version history v1.0 → v4.0 |
 
 ---
 
-*Philippe-Antoine Robert — 2026-05-03 07:22:48 UTC*  
+*Philippe-Antoine Robert*  
 *"Intelligence is not a matter of size. It is a matter of structure."*
