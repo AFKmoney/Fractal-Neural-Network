@@ -1,21 +1,29 @@
 #!/usr/bin/env python3
 """
-NFN AGI Training Script
+NFN AGI Training — v5.0
 
-Trains an AGINFNModel with all AGI-specific training features:
-  - Multi-objective AGI loss (LM + causal + goal + coherence + ponder + pred
-                              + free_energy + consistency)
-  - Curriculum ramp: LM-only first, then AGI losses phase in
-  - Self-play improvement loop with DPO-lite preference learning
-  - Constitutional self-critique (generate → critique → revise → train)
-  - WAKE/SLEEP memory cycle (episodic consolidation + replay)
-  - Curiosity-driven loss weighting (upweight high-entropy examples)
+Trains AGINFNModel beyond next-token prediction with five concurrent signals:
+
+  1. Language modelling       — standard cross-entropy with curiosity weighting
+  2. Multi-objective AGI loss — causal / goal / coherence / ponder / pred /
+                                free_energy / consistency
+  3. Self-play DPO-lite       — generate N candidates, rank by LM loss,
+                                train DPO preference + winner distillation
+  4. Constitutional critique  — generate → critique → revise → train on revision
+  5. WAKE/SLEEP memory cycle  — episodic writes every step, consolidation +
+                                replay every --sleep-every steps
+
+Optional: --ttl (test-time learning)
+    Wraps the model with LoRA fast-weight adapters. During each sampling
+    callback the adapter updates on the batch context — the model adapts to
+    its own training distribution in real time without touching main weights.
 
 Usage:
     python train_agi.py --text data/corpus.txt --config nano --epochs 5
     python train_agi.py --text data/corpus.txt --config medium --lr 1e-4
     python train_agi.py --resume checkpoints/agi_nfn_step500.pt
     python train_agi.py --text data/corpus.txt --no-self-play --no-critique
+    python train_agi.py --text data/corpus.txt --ttl --adapter-rank 8
 """
 
 import argparse
@@ -24,6 +32,7 @@ import math
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import torch
 
@@ -33,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 from nfn.config import NFNConfig
 from nfn.agi_model import AGINFNModel, build_agi_model
 from nfn.tokenizer import NFNTokenizer, load_tokenizer
+from nfn.online_learner import OnlineLearner
 from training.agi_trainer import AGITrainer
 
 
@@ -121,6 +131,28 @@ def parse_args() -> argparse.Namespace:
                    help="Prompt for text samples during training")
     p.add_argument("--eval-text",     type=str, default=None,
                    help="Path to held-out text for perplexity evaluation")
+    p.add_argument("--eval-every",    type=int, default=0,
+                   help="Evaluate held-out perplexity every N steps (0 = end only)")
+
+    # Test-time learning (LoRA fast-weight adapters)
+    p.add_argument("--ttl",            action="store_true",
+                   help="Enable test-time learning: LoRA adapters update at inference "
+                        "time without modifying base weights")
+    p.add_argument("--adapter-rank",   type=int,   default=8,
+                   help="LoRA adapter rank for test-time learning")
+    p.add_argument("--online-lr",      type=float, default=2e-4,
+                   help="Learning rate for test-time adapter updates")
+    p.add_argument("--online-steps",   type=int,   default=4,
+                   help="Gradient steps per test-time adapt() call")
+    p.add_argument("--ppl-gate",       type=float, default=30.0,
+                   help="Skip adapter update when context ppl < this (model already knows it)")
+    p.add_argument("--adapter-decay",  type=float, default=0.97,
+                   help="Exponential decay applied to adapters after each update "
+                        "(1.0 = no forgetting, 0.9 = fast forgetting)")
+    p.add_argument("--save-adapters",  type=str,   default=None,
+                   help="Save LoRA adapter weights to this path at end of training")
+    p.add_argument("--load-adapters",  type=str,   default=None,
+                   help="Load LoRA adapter weights from this path at start")
 
     return p.parse_args()
 
@@ -291,6 +323,16 @@ def print_startup_info(
         print(f"  Self-play overhead   : ~{sp_overhead:.0f}% "
               f"({args.n_candidates} extra passes every {args.self_play_every} steps)")
 
+    # ── Test-time learning ────────────────────────────────────────────────
+    if getattr(args, "ttl", False):
+        print(f"\n  Test-Time Learning (LoRA fast weights)")
+        print(f"    adapter rank : {args.adapter_rank}")
+        print(f"    online lr    : {args.online_lr}")
+        print(f"    steps/call   : {args.online_steps}")
+        print(f"    ppl gate     : < {args.ppl_gate} → skip (already known)")
+        print(f"    decay/call   : ×{args.adapter_decay}")
+        print(f"    (base weights remain frozen; adapters update at each sample)")
+
     print(f"\n{sep}\n")
 
 
@@ -381,11 +423,49 @@ def main():
         else:
             print(f"Warning: eval text not found at {args.eval_text}")
 
+    # ── Test-time learner (optional) ──────────────────────────────────────
+    online_learner: Optional[OnlineLearner] = None
+    if args.ttl:
+        online_learner = OnlineLearner(
+            model            = model,
+            tokenizer        = tokenizer,
+            adapter_rank     = args.adapter_rank,
+            online_lr        = args.online_lr,
+            n_steps          = args.online_steps,
+            decay_factor     = args.adapter_decay,
+            ppl_gate         = args.ppl_gate,
+            max_adapt_tokens = min(256, model.cfg.max_seq_len),
+        )
+        if args.load_adapters:
+            lpath = Path(args.load_adapters)
+            if lpath.exists():
+                online_learner.load_adapters(str(lpath))
+                print(f"Loaded adapters from {lpath}")
+            else:
+                print(f"Warning: --load-adapters path not found: {lpath}")
+        print(f"Test-time learning: {online_learner}")
+
     # ── Sampling callback ─────────────────────────────────────────────────
     def on_step(metrics: dict):
         step = metrics["step"]
+
+        # Periodic held-out perplexity
+        if eval_text and args.eval_every > 0 and step % args.eval_every == 0:
+            ppl = trainer.eval_perplexity(eval_text,
+                                          seq_len=min(512, model.cfg.max_seq_len))
+            print(f"  [eval ppl @ step {step}]: {ppl:.2f}")
+
         if args.sample_every > 0 and step % args.sample_every == 0:
             model.eval()
+
+            # If TTL is on, adapt the learner to the last batch context first
+            if online_learner is not None and "context_ids" in metrics:
+                adapt_stats = online_learner.adapt(metrics["context_ids"])
+                if not adapt_stats["skipped"]:
+                    print(f"  [TTL] adapted in {adapt_stats['steps']} steps "
+                          f"(ppl {adapt_stats['ppl']:.1f} → loss {adapt_stats['loss']:.4f}, "
+                          f"norm {adapt_stats['adapter_norm']:.4f})")
+
             prompt_ids = torch.tensor(
                 tokenizer.encode(args.sample_prompt, add_bos=True),
                 dtype=torch.long, device=device,
@@ -401,6 +481,10 @@ def main():
             sample_text = tokenizer.decode(out_ids[0].tolist(), skip_special=True)
             print(f"\n── Sample (step {step}) ──")
             print(sample_text)
+            if online_learner is not None:
+                s = online_learner.stats()
+                print(f"  [TTL stats] calls={s['adapt_calls']} "
+                      f"skipped={s['skipped']} norm={s['mean_adapter_norm']:.4f}")
             print("─" * 40 + "\n")
             model.train()
 
@@ -436,6 +520,17 @@ def main():
         print(f"Final step {last.get('step')}: "
               f"lm={last.get('lm', 0.0):.4f} "
               f"agi_w={last.get('agi_weight', 0.0):.2f}")
+
+    # ── Save adapters ─────────────────────────────────────────────────────
+    if online_learner is not None:
+        save_path = args.save_adapters or str(Path(args.output) / "adapters_final.pt")
+        online_learner.save_adapters(save_path)
+        s = online_learner.stats()
+        print(f"\nTest-time learning summary:")
+        print(f"  Adapter params : {s['adapter_params']:,} ({s['adapter_ratio']} of model)")
+        print(f"  Adapt calls    : {s['adapt_calls']} ({s['skipped']} skipped)")
+        print(f"  Avg update loss: {s['avg_loss']:.4f}")
+        print(f"  Adapters saved : {save_path}")
 
 
 if __name__ == "__main__":
