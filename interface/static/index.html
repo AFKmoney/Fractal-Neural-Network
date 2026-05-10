@@ -7,6 +7,333 @@
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Explore tab ─────────────────────────────────────────────────────── */
+    #explore-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    #explore-header h2 { font-size: 16px; font-weight: 600; }
+
+    #explore-layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 0;
+      overflow: hidden;
+      min-height: 0;
+    }
+    #explore-left {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 16px;
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+    }
+    #explore-right {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 16px;
+      overflow-y: auto;
+    }
+
+    .explore-section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text3);
+      margin-bottom: 4px;
+    }
+
+    #explore-url-row {
+      display: flex;
+      gap: 8px;
+    }
+    #explore-url-input {
+      flex: 1;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 8px 12px;
+      font-family: var(--font);
+      font-size: 13px;
+      outline: none;
+    }
+    #explore-url-input:focus { border-color: var(--primary); }
+
+    .explore-auto-params { display: flex; flex-direction: column; gap: 8px; }
+    .explore-param-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .explore-param-row label { font-size: 12px; color: var(--text2); }
+    .explore-param-row input[type="number"] { width: 80px; }
+
+    #explore-keywords-input {
+      width: 100%;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-family: var(--font);
+      font-size: 12px;
+      outline: none;
+    }
+    #explore-keywords-input:focus { border-color: var(--primary); }
+
+    #explore-text-area {
+      width: 100%;
+      height: 80px;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-family: var(--font);
+      font-size: 12px;
+      outline: none;
+      resize: vertical;
+    }
+    #explore-text-area:focus { border-color: var(--primary2); }
+
+    #explore-feed {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+    }
+
+    .explore-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      animation: slideIn 0.2s ease;
+    }
+    .explore-card.error-card { border-color: var(--red); }
+    .explore-card-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .explore-card-url {
+      font-size: 11px;
+      color: var(--primary);
+      font-family: var(--mono);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 6px;
+    }
+    .explore-card-meta {
+      font-size: 11px;
+      color: var(--text3);
+      margin-bottom: 6px;
+    }
+    .explore-card-preview {
+      font-size: 12px;
+      color: var(--text2);
+      line-height: 1.5;
+      margin-top: 4px;
+      background: var(--bg3);
+      border-radius: 4px;
+      padding: 6px 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .ppl-bars {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+      font-size: 11px;
+    }
+    .ppl-label { color: var(--text3); min-width: 65px; }
+    .ppl-bar-wrap {
+      flex: 1;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .ppl-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--green), var(--yellow));
+      transition: width 0.4s ease;
+    }
+    .ppl-bar-fill.after { background: linear-gradient(90deg, var(--primary), var(--primary2)); }
+    .ppl-val { color: var(--primary); font-family: var(--mono); min-width: 45px; text-align: right; }
+
+    .explore-done-banner {
+      background: linear-gradient(135deg, #4ade8015, #6ee7f710);
+      border: 1px solid var(--green);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-size: 13px;
+      color: var(--green);
+    }
+
+    /* ── Adapt (TTL) tab ──────────────────────────────────────────────────── */
+    #adapt-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    #adapt-header h2 { font-size: 16px; font-weight: 600; }
+
+    #adapt-layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 0;
+      overflow: hidden;
+      min-height: 0;
+    }
+    #adapt-left {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+    }
+    #adapt-right {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 16px;
+      overflow-y: auto;
+    }
+
+    .adapt-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .adapt-toggle-label { font-size: 13px; color: var(--text); font-weight: 500; }
+    .toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 12px;
+      background: var(--border2);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 4px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--text3);
+      transition: transform 0.2s, background 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: var(--green); }
+    .toggle-switch input:checked + .toggle-track::after {
+      transform: translateX(20px);
+      background: white;
+    }
+
+    .adapt-param-section { display: flex; flex-direction: column; gap: 8px; }
+    .adapt-param-section label { font-size: 11px; color: var(--text2); display: flex; justify-content: space-between; }
+    .adapt-param-section label span { color: var(--primary); font-weight: 500; font-family: var(--mono); }
+    .adapt-param-section input[type="range"] { width: 100%; }
+
+    .ttl-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    .ttl-stat-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .ttl-stat-label { font-size: 11px; color: var(--text3); margin-bottom: 4px; }
+    .ttl-stat-val { font-size: 16px; font-weight: 600; color: var(--primary); font-family: var(--mono); }
+
+    .adapter-norm-chart-wrap {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+    }
+    .adapt-chart-title {
+      font-size: 11px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+    }
+    #norm-chart { width: 100%; background: var(--bg3); border-radius: 6px; }
+
+    .norm-gauge-wrap {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .norm-gauge-label { font-size: 11px; color: var(--text3); min-width: 80px; }
+    .norm-gauge-track {
+      flex: 1;
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .norm-gauge-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: linear-gradient(90deg, var(--primary), var(--primary2));
+      transition: width 0.5s ease;
+    }
+    .norm-gauge-val { color: var(--primary2); font-family: var(--mono); font-size: 12px; min-width: 50px; text-align: right; }
+
+    #adapt-status-msg {
+      font-size: 12px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      color: var(--text2);
+    }
+
+    /* ── Responsive for new tabs ─────────────────────────────────────────── */
+    @media (max-width: 900px) {
+      #explore-layout, #adapt-layout { grid-template-columns: 1fr; }
+      #explore-left { border-right: none; border-bottom: 1px solid var(--border); }
+      #adapt-left { border-right: none; border-bottom: 1px solid var(--border); }
+    }
+  </style>
 </head>
 <body>
   <!-- Fractal canvas background -->
@@ -50,9 +377,19 @@
           <svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z"/></svg>
           Agent
         </button>
+        <!-- Explore tab — globe icon -->
+        <button class="tab-btn" data-tab="explore">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.73 6.974 6 7.5 6A1.5 1.5 0 019 7.5V8a2 2 0 004 0 2 2 0 011.523-1.943A5.977 5.977 0 0116 10c0 .34-.028.675-.083 1H15a2 2 0 00-2 2v2.197A5.973 5.973 0 0110 16v-2a2 2 0 00-2-2 2 2 0 01-2-2 2 2 0 00-1.668-1.973z" clip-rule="evenodd"/></svg>
+          Explorer
+        </button>
         <button class="tab-btn" data-tab="train">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11 4a1 1 0 10-2 0v4a1 1 0 102 0V7zm-3 1a1 1 0 10-2 0v3a1 1 0 102 0V8zM8 9a1 1 0 00-2 0v2a1 1 0 102 0V9z" clip-rule="evenodd"/></svg>
           Entraînement
+        </button>
+        <!-- Adapt tab — brain icon -->
+        <button class="tab-btn" data-tab="adapt">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd"/></svg>
+          Adaptation
         </button>
         <button class="tab-btn" data-tab="info">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
@@ -171,6 +508,68 @@
         </div>
       </section>
 
+      <!-- ── EXPLORE TAB ─────────────────────────────────────────── -->
+      <section id="tab-explore" class="tab-panel">
+        <div id="explore-header">
+          <h2>Explorer le Web</h2>
+          <span id="explore-status-badge" style="font-size:12px;padding:4px 12px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);">Prêt</span>
+        </div>
+        <div id="explore-layout">
+          <!-- Left controls panel -->
+          <div id="explore-left">
+            <!-- Single URL fetch -->
+            <div class="explore-section-title">Récupérer une page</div>
+            <div id="explore-url-row">
+              <input type="text" id="explore-url-input" placeholder="https://example.com" />
+              <button id="explore-fetch-btn" class="btn-sm">Récupérer</button>
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer">
+              <input type="checkbox" id="explore-adapt-check" checked />
+              Adapter le modèle (TTL)
+            </label>
+
+            <hr style="border:none;border-top:1px solid var(--border);margin:4px 0" />
+
+            <!-- Auto-explore -->
+            <div class="explore-section-title">Exploration autonome</div>
+            <div class="explore-auto-params">
+              <div class="explore-param-row">
+                <label>URL de départ</label>
+              </div>
+              <input type="text" id="explore-seed-input" placeholder="https://fr.wikipedia.org/wiki/Intelligence_artificielle" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:7px 10px;font-family:var(--font);font-size:12px;outline:none" />
+              <div class="explore-param-row">
+                <label>Nombre de pages</label>
+                <input type="number" id="explore-npages" value="5" min="1" max="30" />
+              </div>
+              <div>
+                <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Mots-clés (séparés par des virgules)</label>
+                <input type="text" id="explore-keywords-input" placeholder="intelligence artificielle, apprentissage, réseau neuronal" />
+              </div>
+              <button id="explore-auto-btn" class="btn-primary" style="width:100%">Lancer l'exploration</button>
+              <button id="explore-stop-btn" class="btn-danger" style="width:100%" disabled>Arrêter</button>
+            </div>
+
+            <hr style="border:none;border-top:1px solid var(--border);margin:4px 0" />
+
+            <!-- Direct text adaptation -->
+            <div class="explore-section-title">Adapter depuis du texte</div>
+            <textarea id="explore-text-area" placeholder="Colle ici du texte brut pour que le modèle l'apprenne directement…"></textarea>
+            <button id="explore-adapt-text-btn" class="btn-sm" style="width:100%">Adapter depuis ce texte</button>
+            <div id="explore-text-result" style="font-size:11px;color:var(--green);min-height:16px"></div>
+          </div>
+
+          <!-- Right feed panel -->
+          <div id="explore-right">
+            <div class="panel-label">Fil d'exploration</div>
+            <div id="explore-feed">
+              <div style="color:var(--text3);font-size:13px;text-align:center;margin-top:40px">
+                Récupérez une page ou lancez une exploration pour voir les résultats ici.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ── TRAINING TAB ─────────────────────────────────────── -->
       <section id="tab-train" class="tab-panel">
         <div id="train-header">
@@ -239,13 +638,101 @@
         </div>
       </section>
 
+      <!-- ── ADAPT (TTL) TAB ─────────────────────────────────── -->
+      <section id="tab-adapt" class="tab-panel">
+        <div id="adapt-header">
+          <h2>Adaptation Test-Time (TTL)</h2>
+          <button id="adapt-refresh-btn" class="btn-sm">Actualiser stats</button>
+        </div>
+        <div id="adapt-layout">
+          <!-- Left: controls -->
+          <div id="adapt-left">
+            <!-- Enable/disable toggle -->
+            <div class="adapt-toggle-row">
+              <span class="adapt-toggle-label">Activer l'adaptation TTL</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="ttl-toggle" />
+                <div class="toggle-track"></div>
+              </label>
+            </div>
+            <div id="adapt-status-msg">TTL désactivé — le modèle n'apprend pas en temps réel.</div>
+
+            <hr style="border:none;border-top:1px solid var(--border)" />
+
+            <!-- Adapter rank slider -->
+            <div class="adapt-param-section">
+              <label>Rang adaptateur (LoRA) <span id="adapt-rank-val">8</span></label>
+              <input type="range" id="adapt-rank" min="1" max="64" step="1" value="8"
+                     oninput="document.getElementById('adapt-rank-val').textContent=this.value" />
+            </div>
+
+            <!-- LR slider -->
+            <div class="adapt-param-section">
+              <label>Taux d'apprentissage <span id="adapt-lr-val">2e-4</span></label>
+              <input type="range" id="adapt-lr" min="1" max="100" step="1" value="20"
+                     oninput="document.getElementById('adapt-lr-val').textContent=(this.value*1e-5).toExponential(1)" />
+            </div>
+
+            <!-- Steps slider -->
+            <div class="adapt-param-section">
+              <label>Étapes gradient / appel <span id="adapt-steps-val">4</span></label>
+              <input type="range" id="adapt-steps" min="1" max="16" step="1" value="4"
+                     oninput="document.getElementById('adapt-steps-val').textContent=this.value" />
+            </div>
+
+            <!-- PPL gate -->
+            <div class="adapt-param-section">
+              <label>Seuil perplexité (ppl_gate) <span id="adapt-gate-val">30</span></label>
+              <input type="range" id="adapt-gate" min="5" max="200" step="5" value="30"
+                     oninput="document.getElementById('adapt-gate-val').textContent=this.value" />
+            </div>
+
+            <hr style="border:none;border-top:1px solid var(--border)" />
+
+            <button id="adapt-reset-btn" class="btn-danger" style="width:100%">Réinitialiser les adaptateurs</button>
+          </div>
+
+          <!-- Right: stats and chart -->
+          <div id="adapt-right">
+            <div class="panel-label">Statistiques adaptateurs</div>
+
+            <div class="ttl-stats-grid" id="ttl-stats-grid">
+              <div class="ttl-stat-card"><div class="ttl-stat-label">Nb adaptateurs</div><div class="ttl-stat-val" id="ttl-n-adapters">—</div></div>
+              <div class="ttl-stat-card"><div class="ttl-stat-label">Paramètres</div><div class="ttl-stat-val" id="ttl-params">—</div></div>
+              <div class="ttl-stat-card"><div class="ttl-stat-label">Appels adapt.</div><div class="ttl-stat-val" id="ttl-calls">—</div></div>
+              <div class="ttl-stat-card"><div class="ttl-stat-label">Ignorés (ppl)</div><div class="ttl-stat-val" id="ttl-skipped">—</div></div>
+              <div class="ttl-stat-card" style="grid-column:1/-1"><div class="ttl-stat-label">Perte moyenne</div><div class="ttl-stat-val" id="ttl-avg-loss">—</div></div>
+            </div>
+
+            <!-- Norm gauge -->
+            <div class="adapter-norm-chart-wrap">
+              <div class="adapt-chart-title">Norme adaptateur (moyenne)</div>
+              <div class="norm-gauge-wrap">
+                <span class="norm-gauge-label">Norme courante</span>
+                <div class="norm-gauge-track">
+                  <div class="norm-gauge-fill" id="norm-gauge-fill" style="width:0%"></div>
+                </div>
+                <span class="norm-gauge-val" id="norm-gauge-val">0.000</span>
+              </div>
+              <canvas id="norm-chart" height="120"></canvas>
+            </div>
+
+            <!-- Adapter ratio info -->
+            <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 14px">
+              <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Ratio paramètres adaptés / total</div>
+              <div id="ttl-ratio" style="font-size:18px;font-weight:600;color:var(--primary2);font-family:var(--mono)">—</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ── INFO TAB ─────────────────────────────────────────── -->
       <section id="tab-info" class="tab-panel">
         <div id="info-header">
           <h2>Modèle NFN</h2>
           <div id="info-actions">
-            <button id="info-save" class="btn-sm">💾 Sauvegarder</button>
-            <button id="info-reload" class="btn-sm">🔄 Recharger</button>
+            <button id="info-save" class="btn-sm">Sauvegarder</button>
+            <button id="info-reload" class="btn-sm">Recharger</button>
           </div>
         </div>
         <div id="info-layout">

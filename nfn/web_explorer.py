@@ -29,7 +29,12 @@ class _TextExtractor(HTMLParser):
     """
 
     _SKIP_TAGS = frozenset({"script", "style", "nav", "footer", "header",
-                            "noscript", "aside", "meta", "link"})
+                            "noscript", "aside"})
+    # Void elements that appear in _SKIP_TAGS must be listed here so that
+    # handle_starttag never increments _in_skip for them (they have no end tag).
+    _VOID_SKIP = frozenset({"meta", "link", "br", "hr", "input", "img",
+                            "area", "base", "col", "embed", "param",
+                            "source", "track", "wbr"})
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -44,7 +49,11 @@ class _TextExtractor(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list) -> None:
         tag = tag.lower()
-        if tag in self._SKIP_TAGS:
+        # Only non-void tags can have matching end tags, so only increment
+        # the skip counter for those.  Void elements like <meta> and <link>
+        # have no </meta> / </link> end tag and would permanently raise the
+        # counter if we incremented here.
+        if tag in self._SKIP_TAGS and tag not in self._VOID_SKIP:
             self._in_skip += 1
 
         if tag == "title" and self._in_skip == 0:

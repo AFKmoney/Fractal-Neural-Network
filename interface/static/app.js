@@ -702,7 +702,424 @@ document.addEventListener('DOMContentLoaded', () => {
   initAgent();
   initTraining();
   initInfo();
+  initExplore();
+  initAdapt();
 
   refreshStatus();
   setInterval(refreshStatus, 10000);
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Explore tab ───────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+const exploreState = {
+  ws: null,
+  running: false,
+  normHistory: [],   // [{t, norm}] for the adapt tab chart
+};
+
+function initExplore() {
+  $('explore-fetch-btn').addEventListener('click', () => {
+    const url = $('explore-url-input').value.trim();
+    if (!url) return;
+    const adapt = $('explore-adapt-check').checked;
+    fetchUrl(url, adapt);
+  });
+
+  $('explore-url-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') $('explore-fetch-btn').click();
+  });
+
+  $('explore-auto-btn').addEventListener('click', () => {
+    const seed = $('explore-seed-input').value.trim();
+    if (!seed) return;
+    const nPages = parseInt($('explore-npages').value) || 5;
+    const kwRaw = $('explore-keywords-input').value.trim();
+    const keywords = kwRaw ? kwRaw.split(',').map(k => k.trim()).filter(Boolean) : [];
+    startAutoExplore(seed, nPages, keywords);
+  });
+
+  $('explore-stop-btn').addEventListener('click', () => {
+    if (exploreState.ws) {
+      exploreState.ws.close();
+      exploreState.ws = null;
+    }
+    exploreState.running = false;
+    setExploreRunning(false);
+  });
+
+  $('explore-adapt-text-btn').addEventListener('click', () => {
+    const text = $('explore-text-area').value.trim();
+    if (!text) return;
+    adaptText(text);
+  });
+}
+
+/**
+ * Fetch a single URL via POST /api/explore/url
+ * Renders a result card in the explore feed.
+ */
+async function fetchUrl(url, adapt = true) {
+  const feed = $('explore-feed');
+  const placeholder = feed.querySelector('div[style]');
+  if (placeholder) placeholder.remove();
+
+  // Pending card
+  const card = document.createElement('div');
+  card.className = 'explore-card';
+  card.innerHTML = `<div class="explore-card-url">${escapeHtml(url)}</div>
+    <div class="explore-card-meta" style="color:var(--yellow)">Chargement…</div>`;
+  feed.prepend(card);
+
+  try {
+    const res = await api('/api/explore/url', 'POST', { url, adapt });
+    renderExploreCard(card, res);
+  } catch (e) {
+    card.innerHTML = `<div class="explore-card-url">${escapeHtml(url)}</div>
+      <div class="explore-card-meta" style="color:var(--red)">Erreur: ${escapeHtml(e.message)}</div>`;
+    card.classList.add('error-card');
+  }
+}
+
+/**
+ * Render a fetched-page result card.
+ */
+function renderExploreCard(card, data) {
+  if (data.error && !data.title) {
+    card.classList.add('error-card');
+    card.innerHTML = `
+      <div class="explore-card-url">${escapeHtml(data.url || '')}</div>
+      <div class="explore-card-meta" style="color:var(--red)">Erreur: ${escapeHtml(data.error)}</div>`;
+    return;
+  }
+
+  const chars = data.n_chars ? `${data.n_chars.toLocaleString()} chars` : '';
+  const pplBefore = data.ppl_before != null ? data.ppl_before.toFixed(1) : null;
+  const pplAfter  = data.ppl_after  != null ? data.ppl_after.toFixed(4)  : null;
+  const skipped   = data.skipped;
+
+  let pplHtml = '';
+  if (pplBefore != null) {
+    const maxPpl = 100;
+    const bPct = Math.min(100, (parseFloat(pplBefore) / maxPpl) * 100).toFixed(1);
+    pplHtml = `<div class="ppl-bars">
+      <span class="ppl-label">Perplexité</span>
+      <div class="ppl-bar-wrap"><div class="ppl-bar-fill" style="width:${bPct}%"></div></div>
+      <span class="ppl-val">${pplBefore}</span>
+    </div>`;
+  }
+  if (pplAfter != null && !skipped) {
+    const maxPpl = 100;
+    const aPct = Math.min(100, (parseFloat(pplAfter) / maxPpl) * 100).toFixed(1);
+    pplHtml += `<div class="ppl-bars">
+      <span class="ppl-label">Loss après</span>
+      <div class="ppl-bar-wrap"><div class="ppl-bar-fill after" style="width:${aPct}%"></div></div>
+      <span class="ppl-val">${pplAfter}</span>
+    </div>`;
+  }
+
+  const adaptBadge = skipped
+    ? `<span style="color:var(--text3);font-size:11px"> · déjà connu</span>`
+    : (pplBefore != null ? `<span style="color:var(--green);font-size:11px"> · adapté</span>` : '');
+
+  card.innerHTML = `
+    <div class="explore-card-title">${escapeHtml(data.title || '(sans titre)')}</div>
+    <div class="explore-card-url">${escapeHtml(data.url || '')}</div>
+    <div class="explore-card-meta">${chars}${adaptBadge}</div>
+    ${pplHtml}
+    ${data.text_preview ? `<div class="explore-card-preview">${escapeHtml(data.text_preview)}</div>` : ''}
+  `;
+}
+
+/**
+ * Start autonomous exploration via WS /ws/explore.
+ */
+function startAutoExplore(seedUrl, nPages, keywords) {
+  if (exploreState.running) return;
+
+  const feed = $('explore-feed');
+  feed.innerHTML = '';
+  setExploreRunning(true);
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/explore`);
+  exploreState.ws = ws;
+  exploreState.running = true;
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ seed_url: seedUrl, n_pages: nPages, keywords }));
+  };
+
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === 'page') {
+      const card = document.createElement('div');
+      card.className = 'explore-card';
+      feed.appendChild(card);
+      renderExploreCard(card, {
+        url:          msg.url,
+        title:        msg.title,
+        n_chars:      msg.n_chars,
+        ppl_before:   msg.ppl_before,
+        ppl_after:    msg.ppl_after,
+        skipped:      msg.skipped,
+        text_preview: null,
+      });
+      feed.scrollTop = feed.scrollHeight;
+
+    } else if (msg.type === 'error') {
+      const card = document.createElement('div');
+      card.className = 'explore-card error-card';
+      card.innerHTML = `<div class="explore-card-url">${escapeHtml(msg.url || '')}</div>
+        <div class="explore-card-meta" style="color:var(--red)">Erreur: ${escapeHtml(msg.error)}</div>`;
+      feed.appendChild(card);
+
+    } else if (msg.type === 'done') {
+      const banner = document.createElement('div');
+      banner.className = 'explore-done-banner';
+      banner.textContent = `Exploration terminée — ${msg.n_pages} pages, ${(msg.total_chars || 0).toLocaleString()} caractères`;
+      feed.appendChild(banner);
+      feed.scrollTop = feed.scrollHeight;
+      setExploreRunning(false);
+      exploreState.running = false;
+    }
+  };
+
+  ws.onerror = () => {
+    setExploreRunning(false);
+    exploreState.running = false;
+  };
+  ws.onclose = () => {
+    setExploreRunning(false);
+    exploreState.running = false;
+  };
+}
+
+/**
+ * Adapt from raw text via POST /api/explore/text.
+ */
+async function adaptText(text) {
+  const resultEl = $('explore-text-result');
+  resultEl.textContent = 'Adaptation en cours…';
+  resultEl.style.color = 'var(--yellow)';
+  try {
+    const res = await api('/api/explore/text', 'POST', { text });
+    if (res.error) {
+      resultEl.textContent = 'Erreur: ' + res.error;
+      resultEl.style.color = 'var(--red)';
+    } else if (res.skipped) {
+      resultEl.textContent = `Ignoré — perplexité ${res.ppl?.toFixed(1)} < seuil`;
+      resultEl.style.color = 'var(--text3)';
+    } else {
+      resultEl.textContent = `Adapté — ppl ${res.ppl?.toFixed(1)}, loss ${res.loss?.toFixed(4)}, norme ${res.adapter_norm?.toFixed(4)}`;
+      resultEl.style.color = 'var(--green)';
+      // Refresh adapt stats if visible
+      loadTTLStats();
+    }
+  } catch (err) {
+    resultEl.textContent = 'Erreur: ' + err.message;
+    resultEl.style.color = 'var(--red)';
+  }
+}
+
+function setExploreRunning(running) {
+  $('explore-auto-btn').disabled = running;
+  $('explore-stop-btn').disabled = !running;
+  const badge = $('explore-status-badge');
+  if (running) {
+    badge.textContent = 'Exploration en cours…';
+    badge.style.color = 'var(--green)';
+    badge.style.borderColor = 'var(--green)';
+  } else {
+    badge.textContent = 'Prêt';
+    badge.style.color = 'var(--text2)';
+    badge.style.borderColor = 'var(--border)';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Adapt (TTL) tab ───────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+const adaptState = {
+  normHistory: [],     // [float] last 50 mean_adapter_norm readings
+  statsInterval: null,
+};
+
+function initAdapt() {
+  const toggle = $('ttl-toggle');
+  toggle.addEventListener('change', async () => {
+    if (toggle.checked) {
+      await enableTTL(
+        parseInt($('adapt-rank').value),
+        parseInt($('adapt-lr').value) * 1e-5,
+        parseInt($('adapt-steps').value),
+        parseFloat($('adapt-gate').value),
+      );
+    } else {
+      await disableTTL();
+    }
+  });
+
+  $('adapt-refresh-btn').addEventListener('click', loadTTLStats);
+  $('adapt-reset-btn').addEventListener('click', resetAdapters);
+
+  // Poll stats when tab is active
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.tab === 'adapt') {
+        loadTTLStats();
+        if (!adaptState.statsInterval) {
+          adaptState.statsInterval = setInterval(loadTTLStats, 3000);
+        }
+      } else {
+        clearInterval(adaptState.statsInterval);
+        adaptState.statsInterval = null;
+      }
+    });
+  });
+}
+
+/**
+ * GET /api/ttl/stats → update the stats grid and norm gauge.
+ */
+async function loadTTLStats() {
+  try {
+    const data = await api('/api/ttl/stats');
+
+    // Sync toggle state
+    $('ttl-toggle').checked = !!data.enabled;
+
+    const msg = $('adapt-status-msg');
+    if (!data.enabled) {
+      msg.textContent = 'TTL désactivé — le modèle n\'apprend pas en temps réel.';
+      msg.style.color = 'var(--text2)';
+      return;
+    }
+
+    msg.textContent = 'TTL actif — le modèle s\'adapte à chaque nouvelle page.';
+    msg.style.color = 'var(--green)';
+
+    $('ttl-n-adapters').textContent = data.n_adapters ?? '—';
+    $('ttl-params').textContent     = data.adapter_params != null
+      ? (data.adapter_params / 1000).toFixed(1) + 'k' : '—';
+    $('ttl-calls').textContent   = data.adapt_calls   ?? '—';
+    $('ttl-skipped').textContent = data.skipped        ?? '—';
+    $('ttl-avg-loss').textContent = data.avg_loss      != null
+      ? data.avg_loss.toFixed(4) : '—';
+    $('ttl-ratio').textContent   = data.adapter_ratio  ?? '—';
+
+    const norm = data.mean_adapter_norm ?? 0;
+    const normPct = Math.min(100, norm * 1000).toFixed(1);
+    $('norm-gauge-fill').style.width = normPct + '%';
+    $('norm-gauge-val').textContent  = norm.toFixed(4);
+
+    adaptState.normHistory.push(norm);
+    if (adaptState.normHistory.length > 60) adaptState.normHistory.shift();
+    drawNormChart();
+
+  } catch {
+    // Silently ignore — model may not be ready
+  }
+}
+
+/**
+ * POST /api/ttl/enable
+ */
+async function enableTTL(rank, lr, steps, gate) {
+  try {
+    const res = await api('/api/ttl/enable', 'POST', {
+      adapter_rank: rank,
+      online_lr:    lr,
+      n_steps:      steps,
+      ppl_gate:     gate,
+    });
+    if (res.error) {
+      $('adapt-status-msg').textContent = 'Erreur: ' + res.error;
+      $('adapt-status-msg').style.color = 'var(--red)';
+      $('ttl-toggle').checked = false;
+    } else {
+      await loadTTLStats();
+    }
+  } catch (e) {
+    $('adapt-status-msg').textContent = 'Erreur: ' + e.message;
+    $('ttl-toggle').checked = false;
+  }
+}
+
+/**
+ * POST /api/ttl/disable
+ */
+async function disableTTL() {
+  try {
+    await api('/api/ttl/disable', 'POST');
+    await loadTTLStats();
+    adaptState.normHistory = [];
+    drawNormChart();
+  } catch { /* ignore */ }
+}
+
+/**
+ * POST /api/ttl/reset
+ */
+async function resetAdapters() {
+  try {
+    const res = await api('/api/ttl/reset', 'POST');
+    if (res.error) {
+      alert('Erreur: ' + res.error);
+    } else {
+      adaptState.normHistory = [];
+      await loadTTLStats();
+    }
+  } catch (e) {
+    alert('Erreur: ' + e.message);
+  }
+}
+
+/**
+ * Draw the adapter-norm-over-time mini-chart on the norm-chart canvas.
+ */
+function drawNormChart() {
+  const canvas = $('norm-chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || canvas.width;
+  const H = canvas.height;
+  canvas.width = W;
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#12141c';
+  ctx.fillRect(0, 0, W, H);
+
+  const hist = adaptState.normHistory;
+  if (hist.length < 2) return;
+
+  const maxV = Math.max(...hist, 0.001);
+
+  // Grid line
+  ctx.strokeStyle = '#252840';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+
+  // Line
+  const grad = ctx.createLinearGradient(0, 0, W, 0);
+  grad.addColorStop(0, '#6ee7f7');
+  grad.addColorStop(1, '#a78bfa');
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  hist.forEach((v, i) => {
+    const x = (i / Math.max(hist.length - 1, 1)) * W;
+    const y = H - (v / maxV) * (H - 8) - 4;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Label
+  ctx.fillStyle = '#6ee7f7';
+  ctx.font = '10px JetBrains Mono, monospace';
+  ctx.fillText(`norm: ${hist[hist.length - 1].toFixed(4)}`, 4, 12);
+}

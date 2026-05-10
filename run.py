@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
 """
-NFN Interface Launcher
-
+NFN AGI — All-in-one launcher
+==============================
 Usage:
-    python run.py                         # start on default port 8000
-    python run.py --port 8080
-    python run.py --model checkpoints/nfn_final.pt
-    python run.py --config small          # use small preset
+    python run.py                          # nano model, port 8000, open browser
+    python run.py --config small           # small model preset
+    python run.py --model checkpoints/agi_nfn_final.pt
+    python run.py --port 8080 --no-open
+    python run.py --ttl                    # enable test-time learning at startup
+    python run.py --host 0.0.0.0           # expose to LAN
+
+Options:
+    --host HOST          Bind host (default: 127.0.0.1)
+    --port PORT          TCP port  (default: 8000)
+    --model PATH         Pre-load checkpoint (.pt file)
+    --config NAME        Model size preset: nano | small | medium
+    --open / --no-open   Auto-open browser tab (default: --open)
+    --ttl                Enable test-time adaptation at startup
+    --adapter-rank N     LoRA adapter rank for TTL (default: 8)
+    --reload             Dev mode with auto-reload
 """
 
 import argparse
@@ -14,62 +26,124 @@ import json
 import os
 import sys
 import webbrowser
+import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
+BANNER = r"""
+  ╔══════════════════════════════════════════════════════════════╗
+  ║   ⬡  Neural Fractal Network — AGI All-in-One App  ⬡         ║
+  ║                                                              ║
+  ║   • Chat avec le modèle          /ws/chat                    ║
+  ║   • Entraînement en direct       /api/train/start            ║
+  ║   • Exploration web (auto-learn) /ws/explore                 ║
+  ║   • Adaptation test-time (TTL)   /api/ttl/enable             ║
+  ╚══════════════════════════════════════════════════════════════╝
+"""
 
-def parse_args():
-    p = argparse.ArgumentParser(description="NFN Web Interface")
-    p.add_argument("--host", type=str, default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8000)
-    p.add_argument("--model", type=str, default=None, help="Checkpoint path to pre-load")
-    p.add_argument("--config", type=str, default="nano",
-                   choices=["nano", "small", "medium"])
-    p.add_argument("--open", action="store_true", default=True,
-                   help="Open browser automatically")
-    p.add_argument("--no-open", dest="open", action="store_false")
-    p.add_argument("--reload", action="store_true", help="Dev mode with auto-reload")
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="NFN AGI — Interface web + apprentissage autonome",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument("--host",          type=str,   default="127.0.0.1",
+                   help="Adresse d'écoute (default: 127.0.0.1)")
+    p.add_argument("--port",          type=int,   default=8000,
+                   help="Port TCP (default: 8000)")
+    p.add_argument("--model",         type=str,   default=None,
+                   help="Chemin vers un checkpoint .pt à précharger")
+    p.add_argument("--config",        type=str,   default="nano",
+                   choices=["nano", "small", "medium"],
+                   help="Taille du modèle (default: nano)")
+    p.add_argument("--open",          dest="open_browser",
+                   action="store_true",  default=True,
+                   help="Ouvrir le navigateur automatiquement (default)")
+    p.add_argument("--no-open",       dest="open_browser",
+                   action="store_false",
+                   help="Ne pas ouvrir le navigateur")
+    p.add_argument("--ttl",           action="store_true", default=False,
+                   help="Activer l'adaptation test-time au démarrage")
+    p.add_argument("--adapter-rank",  type=int,   default=8,
+                   help="Rang LoRA pour TTL (default: 8)")
+    p.add_argument("--reload",        action="store_true", default=False,
+                   help="Mode dev avec rechargement automatique")
     return p.parse_args()
 
 
-def main():
+def _open_browser(url: str, delay: float = 1.5) -> None:
+    """Open browser tab after a short delay (so the server has time to start)."""
+    def _do_open():
+        time.sleep(delay)
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    threading.Thread(target=_do_open, daemon=True).start()
+
+
+def _try_pywebview(url: str, title: str = "NFN AGI") -> bool:
+    """
+    Try to open a native pywebview window.
+    Returns True if successful, False if pywebview is not installed.
+    """
+    try:
+        import webview  # type: ignore[import]
+        webview.create_window(title, url, width=1280, height=800, resizable=True)
+        webview.start()
+        return True
+    except ImportError:
+        return False
+    except Exception:
+        return False
+
+
+def main() -> None:
     args = parse_args()
 
-    print(f"""
-╔══════════════════════════════════════════════════════════╗
-║       Neural Fractal Network — Interface v1.0            ║
-║  Réseau neuronal à topologie fractale et couplage        ║
-║  sinusoïdal paramétrique — Philippe-Antoine Robert       ║
-╚══════════════════════════════════════════════════════════╝
+    url = f"http://{args.host}:{args.port}"
 
-  → URL: http://{args.host}:{args.port}
-  → Config: {args.config}
-  → Model: {args.model or 'auto-detect'}
+    print(BANNER)
+    print(f"  Adresse    : {url}")
+    print(f"  Config     : {args.config}")
+    print(f"  Modèle     : {args.model or 'initialisation automatique'}")
+    print(f"  TTL        : {'activé (rank=' + str(args.adapter_rank) + ')' if args.ttl else 'désactivé'}")
+    print(f"  Dev reload : {'oui' if args.reload else 'non'}")
+    print()
+    print("  Appuyez sur Ctrl+C pour arrêter.")
+    print()
 
-  Tabs: Chat · Code · Agent · Training · Model Info
-  Press Ctrl+C to stop.
-""")
-
-    # Write runtime config for the app to pick up
+    # Write runtime config so interface/app.py can pick it up
     runtime = {
-        "config_name": args.config,
-        "model_path": args.model,
+        "config_name":   args.config,
+        "model_path":    args.model,
+        "ttl":           args.ttl,
+        "adapter_rank":  args.adapter_rank,
     }
     runtime_path = ROOT / ".nfn_runtime.json"
     runtime_path.write_text(json.dumps(runtime))
 
-    url = f"http://{args.host}:{args.port}"
-    if args.open:
-        import threading
-        def _open():
-            import time; time.sleep(1.5)
-            webbrowser.open(url)
-        threading.Thread(target=_open, daemon=True).start()
-
+    # Import uvicorn early so we get a clear error message
     try:
         import uvicorn
+    except ImportError:
+        print("  [ERREUR] uvicorn non installé.")
+        print("  Installe les dépendances avec : pip install -r requirements.txt")
+        sys.exit(1)
+
+    # Decide how to open the UI
+    use_pywebview = False
+    if args.open_browser:
+        # Try native window first; fall back to browser tab
+        # We can only try pywebview *after* the server is running,
+        # so we just schedule the browser open for now.
+        _open_browser(url, delay=1.5)
+
+    try:
         uvicorn.run(
             "interface.app:app",
             host=args.host,
@@ -77,12 +151,14 @@ def main():
             reload=args.reload,
             log_level="info",
         )
-    except ImportError:
-        print("Error: uvicorn not installed. Run: pip install uvicorn")
-        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n  Arrêt demandé. À bientôt !")
     finally:
         if runtime_path.exists():
-            runtime_path.unlink()
+            try:
+                runtime_path.unlink()
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":
