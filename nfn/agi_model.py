@@ -359,6 +359,46 @@ class AGINFNModel(nn.Module):
         return ids
 
     @torch.no_grad()
+    def _encode(self, input_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Embed + run all blocks + ln_f with no memory writes.
+
+        Mirrors the block-execution path in forward() exactly (including
+        RecursiveReasoner and PredictiveCodingBlock feedback), so speculative
+        decoding gets consistent hidden states with the verification pass.
+        Returns [B, L, d].
+        """
+        h = self.embed(input_ids)
+        B = h.shape[0]
+        prev_prediction = None
+
+        for block in self.blocks:
+            if self.reasoner is not None:
+                # Use default-arg capture so each closure binds the right block/prev
+                def _fn(h_in, _block=block, _prev=prev_prediction):
+                    if isinstance(_block, PredictiveCodingBlock):
+                        out, _ = _block(h_in, prediction_above=_prev,
+                                        write_memory=False)
+                    else:
+                        out, _ = _block(h_in, write_memory=False)
+                    return out, {}
+                h, _, _ = self.reasoner(h, _fn)
+            else:
+                if isinstance(block, PredictiveCodingBlock):
+                    h, _ = block(h, prediction_above=prev_prediction,
+                                 write_memory=False)
+                    prev_prediction = block.last_prediction
+                else:
+                    h, _ = block(h, write_memory=False)
+
+            # Guard: some AGI sub-modules (self-consistency, free-energy) may
+            # temporarily expand the batch internally.  Clamp back to B.
+            if h.shape[0] != B:
+                h = h[:B]
+
+        return self.ln_f(h)
+
+    @torch.no_grad()
     def _speculative_generate(
         self,
         input_ids:      torch.Tensor,
@@ -370,66 +410,52 @@ class AGINFNModel(nn.Module):
         Speculative decoding: MTP heads draft N tokens, full model verifies.
         Typical speedup: 2-4x over standard autoregressive generation.
         """
-        ids     = input_ids
-        eos     = eos_token_id if eos_token_id is not None else self.cfg.eos_token_id
-        N       = self.mtp.n_heads
+        ids       = input_ids
+        eos       = eos_token_id if eos_token_id is not None else self.cfg.eos_token_id
+        N         = self.mtp.n_heads
         generated = 0
 
         while generated < max_new_tokens:
             B, L = ids.shape
+            device = ids.device
 
-            # 1. Run full model to get hidden state for draft generation
-            h = self.embed(ids)
-            for block in self.blocks:
-                result = block(h, write_memory=False)
-                h = result[0] if isinstance(result, tuple) else result
-            h = self.ln_f(h)
+            # 1. Get hidden state via the same code path as forward()
+            h = self._encode(ids)                    # [B, L, d]
 
-            # 2. Draft N tokens using MTP heads (from last hidden state)
-            h_last    = h[:, -1:, :]                   # [B, 1, d]
-            all_head_logits = self.mtp(h_last)         # N × [B, 1, V]
+            # 2. Draft N tokens using MTP heads (operate on last hidden state)
+            h_last          = h[:, -1:, :]           # [B, 1, d]
+            all_head_logits = self.mtp(h_last)       # N × [B, 1, V]
             draft_ids = torch.cat(
                 [F.softmax(lg[:, 0] / max(temperature, 1e-5), dim=-1
                  ).multinomial(1) for lg in all_head_logits],
                 dim=1,
             )  # [B, N]
 
-            # 3. Verify draft by running full model on context + draft
-            candidate = torch.cat([ids, draft_ids], dim=1)   # [B, L+N]
-            h_verify  = self.embed(candidate)
-            for block in self.blocks:
-                result = block(h_verify, write_memory=False)
-                h_verify = result[0] if isinstance(result, tuple) else result
-            h_verify = self.ln_f(h_verify)
-            verify_logits = (
-                self.lm_head(h_verify)
-                if not isinstance(self.lm_head, BayesianZipfianDecoder)
-                else self.lm_head(h_verify)
-            )  # [B, L+N, V]
+            # 3. Verify draft: use forward() to stay consistent with training graph
+            candidate = torch.cat([ids, draft_ids], dim=1)    # [B, L+N]
+            verify_logits, _ = self.forward(candidate, write_memory=False)  # [B, L+N, V]
 
             # 4. Accept/reject each draft token
             new_tokens = []
+            batch_idx  = torch.arange(B, device=device)
             for i in range(N):
-                v_log = verify_logits[:, L + i - 1, :]
+                v_log  = verify_logits[:, L + i - 1, :]
                 v_prob = F.softmax(v_log / max(temperature, 1e-5), -1)
-                d_tok  = draft_ids[:, i]
-                accept = v_prob[torch.arange(B), d_tok] > 0.5
+                d_tok  = draft_ids[:, i]                       # [B]
+                accept = v_prob[batch_idx, d_tok] > 0.5
                 if accept.all():
                     new_tokens.append(d_tok.unsqueeze(1))
                 else:
-                    # Fallback: sample from verified distribution
-                    fallback = torch.multinomial(v_prob, 1)
-                    new_tokens.append(fallback)
+                    new_tokens.append(torch.multinomial(v_prob, 1))
                     break
 
             if not new_tokens:
-                # Safety: emit at least one token
                 last_logits = verify_logits[:, L - 1, :]
                 p = F.softmax(last_logits / max(temperature, 1e-5), -1)
                 new_tokens.append(torch.multinomial(p, 1))
 
-            new_ids = torch.cat(new_tokens, dim=1)
-            ids = torch.cat([ids, new_ids], dim=1)
+            new_ids   = torch.cat(new_tokens, dim=1)
+            ids       = torch.cat([ids, new_ids], dim=1)
             generated += new_ids.shape[1]
 
             if eos is not None and (new_ids == eos).any():
@@ -471,6 +497,7 @@ class AGINFNModel(nn.Module):
         if cfg.use_multi_token_pred:      mods.append(f"MTP (N={cfg.mtp_n_heads})")
         if cfg.use_streaming:             mods.append(f"streaming (W={cfg.streaming_window_size})")
         if cfg.use_hyper_net:             mods.append(f"hyper-net (r={cfg.hyper_rank})")
+        if cfg.use_ssm:                   mods.append(f"SSM (N={cfg.ssm_d_state})")
         return (
             f"AGINFNModel(\n"
             f"  vocab={cfg.vocab_size}  d={cfg.d_model}  blocks={cfg.n_blocks}\n"
@@ -501,6 +528,7 @@ def build_agi_model(
     use_mod:                bool  = True,
     use_mtp:                bool  = True,
     use_hyper:              bool  = True,
+    use_ssm:                bool  = False,    # Mamba-style SSM recurrence
     **kwargs,
 ) -> AGINFNModel:
     """
@@ -527,6 +555,7 @@ def build_agi_model(
         use_mixture_of_depths   = use_mod,
         use_multi_token_pred    = use_mtp,
         use_hyper_net           = use_hyper,
+        use_ssm                 = use_ssm,
         **kwargs,
     )
     return AGINFNModel(cfg)

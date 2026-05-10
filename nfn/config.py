@@ -177,6 +177,14 @@ class NFNConfig:
     hyper_z_dim: int = 64                 # context embedding dimension
     hyper_scale: float = 0.02             # ΔW magnitude scale
 
+    # ── SSM — Selective State Space (Mamba-style) ──────────────────────────
+    # Adds true O(1) per-token recurrence alongside fractal attention.
+    # Enables: infinite context with NO chunking, streaming state accumulation.
+    use_ssm: bool = False
+    ssm_d_state: int = 16               # SSM hidden state dimension N
+    ssm_d_conv: int = 4                 # depthwise conv kernel size
+    ssm_expand: int = 2                 # inner channel expansion factor
+
     @property
     def n_motifs(self) -> int:
         return len(self.motifs)

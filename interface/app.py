@@ -1,23 +1,25 @@
 """
-NFN Interface — FastAPI server.
+NFN AGI Interface v4.0 — FastAPI server
 
 Endpoints:
-  GET  /                    → web UI
-  GET  /api/status          → model info
-  POST /api/chat            → single-turn chat (JSON)
-  POST /api/generate        → raw text generation (JSON)
-  POST /api/code            → code completion (JSON)
-  POST /api/train/start     → start background training
-  POST /api/train/stop      → stop training
-  GET  /api/train/status    → training metrics
-  POST /api/load_model      → load checkpoint
-  POST /api/save_model      → save checkpoint + memory state
-  POST /api/condense        → one-shot NFMC condensation (no training)
-  POST /api/memory/reset    → reset persistent working memory
-  GET  /api/memory/state    → inspect current memory state
-  WS   /ws/stream           → streaming generation (WebSocket)
-  WS   /ws/train            → live training metrics (WebSocket)
-  POST /api/agent/run       → run reasoning agent step
+  GET  /                      → web UI (chat + tools + memory inspector)
+  GET  /api/status            → model info, active features
+  POST /api/chat              → multi-turn chat (JSON, blocking)
+  POST /api/think             → think + answer (shows reasoning rounds)
+  POST /api/agent/run         → tool-calling agent task
+  POST /api/learn             → learn new text into episodic memory
+  POST /api/retrieve          → search episodic memory
+  POST /api/rag               → generate with RAG context
+  POST /api/generate          → raw text generation
+  POST /api/train/start       → start background training (AGITrainer)
+  POST /api/train/stop        → stop training
+  GET  /api/train/status      → live training metrics
+  POST /api/memory/reset      → reset working memory slots
+  GET  /api/memory/state      → inspect memory state
+  POST /api/memory/save       → persist knowledge store
+  WS   /ws/stream             → streaming generation (WebSocket)
+  WS   /ws/chat               → streaming chat (WebSocket)
+  WS   /ws/train              → live training metrics (WebSocket)
 """
 
 import asyncio
@@ -37,501 +39,920 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# ── Adjust path so we can import top-level packages ──────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from nfn.config import NFNConfig
-from nfn.network import NFNLanguageModel
-from nfn.nfmc import NFMCLanguageModel
-from nfn.tokenizer import NFNTokenizer, load_tokenizer
-from inference.engine import NFNInferenceEngine
-from training.trainer import NFNTrainer
-from interface.agents import ChatAgent, CodeAgent, ReasoningAgent
+from nfn.tokenizer import NFNTokenizer
+from nfn.agi_model import build_agi_model
+from inference.engine import AGIInferenceEngine
+from training.agi_trainer import AGITrainer
+from interface.agents import ChatAgent, ThinkAgent, ToolAgent, LearnAgent, CodeAgent, ReasoningAgent
 
 
-app = FastAPI(title="Neural Fractal Network", version="2.0.0")
+# ─────────────────────────────────────────────────────────────────────────────
+# App & CORS
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ── CORS Middleware ──────────────────────────────────────────────────────────
-# Restrict origins to safe defaults (localhost and 127.0.0.1)
+app = FastAPI(title="NFN AGI Interface", version="4.0.0")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost",
-        "http://127.0.0.1",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Static files ──────────────────────────────────────────────────────────────
-STATIC_DIR = Path(__file__).parent / "static"
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# ─────────────────────────────────────────────────────────────────────────────
+# Global model state
+# ─────────────────────────────────────────────────────────────────────────────
 
-# ── Global state ─────────────────────────────────────────────────────────────
+_engine:   Optional[AGIInferenceEngine] = None
+_trainer:  Optional[AGITrainer]         = None
+_train_thread: Optional[threading.Thread] = None
+_train_metrics: List[Dict]               = []
+_ws_clients: List[WebSocket]             = []
 
-class AppState:
-    model: Optional[NFNLanguageModel] = None
-    tokenizer: Optional[NFNTokenizer] = None
-    engine: Optional[NFNInferenceEngine] = None
-    trainer: Optional[NFNTrainer] = None
-    training_thread: Optional[threading.Thread] = None
-    training_metrics: List[Dict] = []
-    device: torch.device = torch.device("cpu")
-    model_path: Optional[str] = None
-    training_clients: List[WebSocket] = []
-
-state = AppState()
+KNOWLEDGE_STORE_PATH = str(ROOT / "checkpoints" / "knowledge_store.json.gz")
 
 
-def _detect_device() -> torch.device:
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
+def get_engine() -> AGIInferenceEngine:
+    global _engine
+    if _engine is None:
+        raise RuntimeError("Model not loaded — call /api/load_model first or restart with a checkpoint")
+    return _engine
 
 
-def _load_default_model(config_name: str = "nano"):
-    """Load (or create) the default NFN model."""
-    cfg_path = ROOT / "configs" / f"{config_name}.json"
-    if cfg_path.exists():
-        with open(cfg_path) as f:
-            cfg = NFNConfig.from_dict(json.load(f))
-    else:
-        cfg = NFNConfig()
-        cfg.n_levels = 3
-        cfg.n_blocks = 2
-        cfg.d_model = 128
-        cfg.d_ff = 512
-        cfg.max_seq_len = 256
-        cfg.n_time_steps = 4
+def _init_default_model():
+    """Initialise a tiny model for immediate use (no checkpoint needed)."""
+    global _engine
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tokenizer = NFNTokenizer()
 
-    tok = NFNTokenizer()
-    cfg.vocab_size = tok.vocab_size
-    cfg.pad_token_id = tok.pad_token_id
-    cfg.bos_token_id = tok.bos_token_id
-    cfg.eos_token_id = tok.eos_token_id
+    model = build_agi_model(
+        vocab_size           = tokenizer.vocab_size,
+        d_model              = 256,
+        n_blocks             = 4,
+        use_reasoning        = True,
+        use_predictive_coding = True,
+        use_free_energy      = True,
+        use_self_consistency = True,
+        use_plan_executor    = True,
+        use_mod              = True,
+        use_mtp              = True,
+        use_hyper            = True,
+    ).to(device)
 
-    device = _detect_device()
-    model = NFNLanguageModel(cfg).to(device)
-
-    ckpt_path = ROOT / "checkpoints" / "nfn_final.pt"
-    if ckpt_path.exists():
-        ckpt = torch.load(ckpt_path, map_location=device)
-        model.load_state_dict(ckpt["model_state"])
-        print(f"Loaded checkpoint from {ckpt_path}")
-
-    engine = NFNInferenceEngine(model, tok, device)
-
-    state.model = model
-    state.tokenizer = tok
-    state.engine = engine
-    state.device = device
-
-    print(f"NFN ready | params={model.param_summary()} | device={device}")
-    return model
+    _engine = AGIInferenceEngine(
+        model,
+        tokenizer,
+        knowledge_store_path=KNOWLEDGE_STORE_PATH,
+    )
+    print(f"[NFN AGI] Model loaded: {sum(p.numel() for p in model.parameters()):,} params on {device}")
 
 
-# ── Startup ───────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Request/Response models
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ChatRequest(BaseModel):
+    messages:      List[Dict[str, str]]
+    system:        Optional[str]  = None
+    max_tokens:    int            = 512
+    temperature:   float          = 0.8
+    top_k:         int            = 50
+    top_p:         float          = 0.95
+    think_rounds:  int            = 0
+    use_tools:     bool           = False
+    use_rag:       bool           = True
+
+class GenerateRequest(BaseModel):
+    prompt:        str
+    max_tokens:    int   = 256
+    temperature:   float = 0.8
+    top_k:         int   = 50
+    top_p:         float = 0.95
+    greedy:        bool  = False
+    think_rounds:  int   = 0
+    speculative:   bool  = False
+
+class ThinkRequest(BaseModel):
+    question:      str
+    n_rounds:      int   = 3
+    max_answer_tokens: int = 512
+    temperature:   float = 0.7
+
+class AgentRequest(BaseModel):
+    task:          str
+    system:        Optional[str] = None
+    max_tokens:    int   = 1024
+    temperature:   float = 0.7
+
+class LearnRequest(BaseModel):
+    text:   str
+    source: str = "user"
+
+class RetrieveRequest(BaseModel):
+    query:  str
+    top_k:  int = 4
+
+class RagRequest(BaseModel):
+    prompt:     str
+    top_k:      int   = 3
+    max_tokens: int   = 256
+    temperature: float = 0.8
+
+class TrainRequest(BaseModel):
+    text:             str
+    n_epochs:         int   = 1
+    seq_len:          int   = 256
+    batch_size:       int   = 4
+    lr:               float = 3e-4
+    agi_loss_start:   int   = 100
+    agi_loss_ramp:    int   = 50
+
+class LoadModelRequest(BaseModel):
+    checkpoint_path: str
+    device:          str = "cpu"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Startup
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def startup():
-    try:
-        _load_default_model()
-    except Exception as e:
-        print(f"Warning: could not load model at startup: {e}")
+    _init_default_model()
 
 
-# ── Root page ─────────────────────────────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    html_path = STATIC_DIR / "index.html"
-    return html_path.read_text(encoding="utf-8")
-
-
-# ── Request / Response models ─────────────────────────────────────────────────
-
-class ChatRequest(BaseModel):
-    messages: List[Dict[str, str]]
-    system: str = "Tu es NFN, un assistant IA basé sur le Neural Fractal Network."
-    max_tokens: int = 400
-    temperature: float = 0.8
-    top_k: int = 50
-    top_p: float = 0.95
-    strategy: str = "top_p"
-
-class GenerateRequest(BaseModel):
-    prompt: str
-    max_tokens: int = 300
-    temperature: float = 0.8
-    top_k: int = 50
-    top_p: float = 0.95
-    strategy: str = "top_p"
-
-class CodeRequest(BaseModel):
-    code: str
-    instruction: str = ""
-    language: str = "python"
-    max_tokens: int = 500
-    temperature: float = 0.4
-
-class TrainRequest(BaseModel):
-    text: str
-    n_epochs: int = 3
-    seq_len: int = 128
-    batch_size: int = 2
-    lr: float = 3e-4
-    config_name: str = "nano"
-
-class AgentRequest(BaseModel):
-    goal: str
-    history: List[Dict] = []
-    max_steps: int = 5
-
-class LoadModelRequest(BaseModel):
-    path: str
-    config_name: Optional[str] = None
-
-
-# ── API endpoints ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Status
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/status")
 async def status():
-    if state.model is None:
-        return {"status": "no_model", "model": None}
-    return {
-        "status": "ready",
-        "model": {
-            "params": state.model.param_summary(),
-            "n_params": state.model.n_params(),
-            "vocab_size": state.model.cfg.vocab_size,
-            "d_model": state.model.cfg.d_model,
-            "n_levels": state.model.cfg.n_levels,
-            "n_blocks": state.model.cfg.n_blocks,
-            "motifs": state.model.cfg.motifs,
-            "max_seq_len": state.model.cfg.max_seq_len,
-            "device": str(state.device),
-        },
-        "training": _training_status(),
-    }
+    try:
+        return JSONResponse(get_engine().status())
+    except RuntimeError as e:
+        return JSONResponse({"error": str(e)}, status_code=503)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Chat
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    if state.engine is None:
-        return JSONResponse(status_code=503, content={"error": "Model not loaded"})
+    engine = get_engine()
+    agent = ChatAgent(
+        engine,
+        use_rag      = req.use_rag,
+        think_rounds = req.think_rounds,
+        use_tools    = req.use_tools,
+    )
     try:
-        reply = state.engine.chat(
+        result = agent.reply(
             req.messages,
-            system=req.system,
-            max_new_tokens=req.max_tokens,
-            temperature=req.temperature,
-            top_k=req.top_k,
-            top_p=req.top_p,
-            strategy=req.strategy,
+            system      = req.system,
+            max_tokens  = req.max_tokens,
+            temperature = req.temperature,
+            top_k       = req.top_k,
+            top_p       = req.top_p,
         )
-        return {"reply": reply, "tokens": len(reply)}
+        return JSONResponse(result)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Think
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/think")
+async def think(req: ThinkRequest):
+    engine = get_engine()
+    agent  = ThinkAgent(engine, default_rounds=req.n_rounds)
+    try:
+        result = agent.think_and_answer(
+            req.question,
+            n_rounds          = req.n_rounds,
+            max_answer_tokens = req.max_answer_tokens,
+            temperature       = req.temperature,
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/agent/run")
+async def agent_run(req: AgentRequest):
+    engine = get_engine()
+    agent  = ToolAgent(engine)
+    try:
+        result = agent.run(
+            req.task,
+            system     = req.system,
+            max_new_tokens = req.max_tokens,
+            temperature = req.temperature,
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Generate (raw)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/generate")
 async def generate(req: GenerateRequest):
-    if state.engine is None:
-        return JSONResponse(status_code=503, content={"error": "Model not loaded"})
+    engine = get_engine()
     try:
-        text = state.engine.generate(
-            req.prompt, max_new_tokens=req.max_tokens,
-            temperature=req.temperature, top_k=req.top_k,
-            top_p=req.top_p, strategy=req.strategy,
+        text = engine.generate(
+            req.prompt,
+            max_new_tokens   = req.max_tokens,
+            temperature      = req.temperature,
+            top_k            = req.top_k,
+            top_p            = req.top_p,
+            greedy           = req.greedy,
+            think_rounds     = req.think_rounds,
+            use_speculative  = req.speculative,
         )
-        return {"text": text, "prompt": req.prompt}
+        return JSONResponse({"text": text, "prompt": req.prompt})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
 
 
-@app.post("/api/code")
-async def code_complete(req: CodeRequest):
-    if state.engine is None:
-        return JSONResponse(status_code=503, content={"error": "Model not loaded"})
-    agent = CodeAgent(state.engine)
-    result = agent.complete(req.code, req.instruction, req.language, req.max_tokens, req.temperature)
-    return result
+# ─────────────────────────────────────────────────────────────────────────────
+# Continual Learning
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-@app.post("/api/train/start")
-async def train_start(req: TrainRequest):
-    if state.model is None:
-        # Create a fresh model
-        _load_default_model(req.config_name)
-
-    if state.training_thread and state.training_thread.is_alive():
-        return {"error": "Training already running"}
-
-    state.training_metrics = []
-
-    def step_cb(metrics: Dict):
-        state.training_metrics.append(metrics)
-        # Broadcast to WS clients
-        msg = json.dumps({"type": "metrics", "data": metrics})
-        for ws in list(state.training_clients):
-            asyncio.run_coroutine_threadsafe(
-                _safe_ws_send(ws, msg), asyncio.get_event_loop()
-            )
-
-    trainer = NFNTrainer(
-        state.model, state.tokenizer, state.model.cfg,
-        lr=req.lr,
-        output_dir=str(ROOT / "checkpoints"),
-        step_callback=step_cb,
-    )
-    state.trainer = trainer
-
-    def run_training():
-        try:
-            trainer.train(
-                req.text,
-                n_epochs=req.n_epochs,
-                seq_len=req.seq_len,
-                batch_size=req.batch_size,
-            )
-        except Exception as e:
-            print(f"Training error: {e}")
-            traceback.print_exc()
-
-    state.training_thread = threading.Thread(target=run_training, daemon=True)
-    state.training_thread.start()
-    return {"status": "started"}
-
-
-@app.post("/api/train/stop")
-async def train_stop():
-    if state.trainer:
-        state.trainer.stop()
-    return {"status": "stopping"}
-
-
-@app.get("/api/train/status")
-async def train_status():
-    return _training_status()
-
-
-@app.post("/api/load_model")
-async def load_model(req: LoadModelRequest):
+@app.post("/api/learn")
+async def learn(req: LearnRequest):
+    engine = get_engine()
     try:
-        device = _detect_device()
-        if not os.path.isabs(req.path):
-            req.path = str(ROOT / req.path)
-        ckpt = torch.load(req.path, map_location=device)
-        cfg = NFNConfig.from_dict(ckpt["cfg"])
-        model = NFNLanguageModel(cfg).to(device)
-        model.load_state_dict(ckpt["model_state"])
-        tok = NFNTokenizer()
-        engine = NFNInferenceEngine(model, tok, device)
-        state.model = model
-        state.tokenizer = tok
-        state.engine = engine
-        state.device = device
-        state.model_path = req.path
-        return {"status": "ok", "params": model.param_summary()}
+        result = engine.learn(req.text, source=req.source)
+        return JSONResponse(result)
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.post("/api/save_model")
-async def save_model():
-    if state.model is None:
-        return JSONResponse(status_code=503, content={"error": "No model"})
-    path = ROOT / "checkpoints" / "nfn_manual_save.pt"
-    path.parent.mkdir(exist_ok=True)
-    # Save model weights + memory state
-    mem_states = None
-    if hasattr(state.model, "save_memory"):
-        mem_states = [
-            s.cpu().tolist() if s is not None else None
-            for s in state.model.save_memory()
-        ]
-    torch.save({
-        "model_state": state.model.state_dict(),
-        "cfg": state.model.cfg.to_dict(),
-        "step": getattr(state.trainer, "step", 0),
-        "memory_states": mem_states,
-    }, path)
-    return {"path": str(path)}
+@app.post("/api/retrieve")
+async def retrieve(req: RetrieveRequest):
+    engine = get_engine()
+    try:
+        results = engine.retrieve(req.query, top_k=req.top_k)
+        return JSONResponse({"query": req.query, "results": results})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.post("/api/condense")
-async def condense_model(req: dict = {}):
-    """
-    One-shot NFMC condensation from a text corpus (no SGD).
-    Body: {"text": "...", "max_tokens": 100000}
-    """
-    if state.model is None:
-        return JSONResponse(status_code=503, content={"error": "No model"})
-    if not isinstance(state.model, (NFMCLanguageModel,)) and not hasattr(state.model, 'blocks'):
-        return JSONResponse(status_code=400, content={"error": "Model does not support condensation"})
-    text = req.get("text", "")
-    max_tokens = req.get("max_tokens", 100_000)
-    if not text:
-        return JSONResponse(status_code=400, content={"error": "text is required"})
+@app.post("/api/rag")
+async def rag(req: RagRequest):
+    engine = get_engine()
+    try:
+        text = engine.generate_with_rag(
+            req.prompt,
+            top_k       = req.top_k,
+            max_new_tokens = req.max_tokens,
+            temperature = req.temperature,
+        )
+        return JSONResponse({"text": text, "prompt": req.prompt})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-    import threading
-    def run():
-        try:
-            if isinstance(state.model, NFMCLanguageModel):
-                state.model.condense_from_text(text, state.tokenizer, max_tokens)
-                state.model.condense_vocabulary(text, state.tokenizer, max_tokens)
-            # For hybrid NFNLanguageModel with use_nfmc, condense each block's NFMC layer
-            elif hasattr(state.model, 'blocks'):
-                import torch
-                ids = state.tokenizer.encode(text[:max_tokens])
-                ids_t = torch.tensor(ids, device=state.device).unsqueeze(0)
-                with torch.no_grad():
-                    emb = state.model.embed(ids_t).squeeze(0)
-                for block in state.model.blocks:
-                    if hasattr(block, 'nfmc') and block.nfmc is not None:
-                        block.nfmc.condense_from_hidden(emb)
-        except Exception as e:
-            print(f"Condensation error: {e}")
-    threading.Thread(target=run, daemon=True).start()
-    return {"status": "condensation_started", "max_tokens": max_tokens}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory management
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/api/memory/reset")
 async def memory_reset():
-    """Reset persistent working memory to initial state."""
-    if state.model is None:
-        return JSONResponse(status_code=503, content={"error": "No model"})
-    if hasattr(state.model, "reset_memory"):
-        state.model.reset_memory()
-        return {"status": "ok", "message": "Memory reset"}
-    return {"status": "noop", "message": "Model has no persistent memory"}
+    engine = get_engine()
+    for block in engine.model.blocks:
+        if hasattr(block, "reset_working_memory"):
+            block.reset_working_memory()
+    return JSONResponse({"reset": True})
 
 
 @app.get("/api/memory/state")
 async def memory_state():
-    """Return summary of current memory state."""
-    if state.model is None:
-        return JSONResponse(status_code=503, content={"error": "No model"})
-    if not hasattr(state.model, "save_memory"):
-        return {"has_memory": False}
-    states = state.model.save_memory()
-    summary = []
-    for i, s in enumerate(states):
-        if s is not None:
-            summary.append({
-                "level": i,
-                "shape": list(s.shape),
-                "norm": float(s.norm().item()),
-            })
-    return {"has_memory": True, "banks": summary}
+    engine = get_engine()
+    return JSONResponse({
+        "knowledge_entries": len(engine.learner.store),
+        "stats":             engine.learner.stats(),
+    })
 
 
-@app.post("/api/agent/run")
-async def agent_run(req: AgentRequest):
-    if state.engine is None:
-        return JSONResponse(status_code=503, content={"error": "Model not loaded"})
-    agent = ReasoningAgent(state.engine)
-    result = await agent.run(req.goal, req.history, req.max_steps)
-    return result
+@app.post("/api/memory/save")
+async def memory_save():
+    engine = get_engine()
+    path = KNOWLEDGE_STORE_PATH
+    engine.learner.save_store(path)
+    return JSONResponse({"saved": path, "entries": len(engine.learner.store)})
 
 
-# ── WebSocket streaming ───────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Load model from checkpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/load_model")
+async def load_model(req: LoadModelRequest):
+    global _engine
+    device = torch.device(req.device)
+    try:
+        ckpt = torch.load(req.checkpoint_path, map_location=device, weights_only=False)
+        cfg  = NFNConfig.from_dict(ckpt["cfg"])
+        model = build_agi_model(
+            vocab_size = cfg.vocab_size,
+            d_model    = cfg.d_model,
+            n_blocks   = cfg.n_blocks,
+            use_mod    = cfg.use_mixture_of_depths,
+            use_mtp    = cfg.use_multi_token_pred,
+            use_hyper  = cfg.use_hyper_net,
+        ).to(device)
+        model.load_state_dict(ckpt["model_state"])
+        tokenizer = NFNTokenizer()
+        _engine = AGIInferenceEngine(model, tokenizer, knowledge_store_path=KNOWLEDGE_STORE_PATH)
+        return JSONResponse({"loaded": req.checkpoint_path, **_engine.status()})
+    except Exception as e:
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Training
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/api/train/start")
+async def train_start(req: TrainRequest):
+    global _trainer, _train_thread, _train_metrics
+    engine = get_engine()
+
+    if _train_thread and _train_thread.is_alive():
+        return JSONResponse({"error": "Training already running"}, status_code=400)
+
+    _train_metrics = []
+    _trainer = AGITrainer(
+        engine.model,
+        engine.tokenizer,
+        lr                  = req.lr,
+        agi_loss_start_step = req.agi_loss_start,
+        agi_loss_ramp_steps = req.agi_loss_ramp,
+        step_callback       = lambda m: _train_metrics.append(m),
+    )
+
+    def _run():
+        _trainer.train(
+            req.text,
+            n_epochs   = req.n_epochs,
+            seq_len    = req.seq_len,
+            batch_size = req.batch_size,
+        )
+
+    _train_thread = threading.Thread(target=_run, daemon=True)
+    _train_thread.start()
+    return JSONResponse({"started": True})
+
+
+@app.post("/api/train/stop")
+async def train_stop():
+    global _trainer
+    if _trainer:
+        _trainer.stop()
+    return JSONResponse({"stopped": True})
+
+
+@app.get("/api/train/status")
+async def train_status():
+    running = _train_thread is not None and _train_thread.is_alive()
+    recent  = _train_metrics[-20:] if _train_metrics else []
+    return JSONResponse({"running": running, "recent_metrics": recent, "total_steps": len(_train_metrics)})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WebSocket — streaming generation
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/stream")
 async def ws_stream(ws: WebSocket):
     await ws.accept()
     try:
-        while True:
-            data = await ws.receive_text()
-            req = json.loads(data)
-            prompt = req.get("prompt", "")
-            max_tokens = req.get("max_tokens", 300)
-            temperature = req.get("temperature", 0.8)
-            top_k = req.get("top_k", 50)
-            top_p = req.get("top_p", 0.95)
-            strategy = req.get("strategy", "top_p")
-            mode = req.get("mode", "generate")   # "generate" | "chat"
-
-            if state.engine is None:
-                await ws.send_text(json.dumps({"type": "error", "text": "Model not loaded"}))
-                continue
-
-            await ws.send_text(json.dumps({"type": "start"}))
-            generated = ""
-
-            if mode == "chat":
-                messages = req.get("messages", [{"role": "user", "content": prompt}])
-                system = req.get("system", "Tu es NFN, un assistant IA Neural Fractal Network.")
-                # Build prompt
-                parts = [f"<sys>{system}</sys>\n"]
-                for msg in messages:
-                    r, c = msg["role"], msg["content"]
-                    tag = "usr" if r == "user" else "ast"
-                    parts.append(f"<{tag}>{c}</{tag}>\n")
-                parts.append("<ast>")
-                full_prompt = "".join(parts)
-            else:
-                full_prompt = prompt
-
-            async for token in state.engine.astream(
-                full_prompt, max_new_tokens=max_tokens,
-                temperature=temperature, top_k=top_k,
-                top_p=top_p, strategy=strategy,
-            ):
-                generated += token
-                await ws.send_text(json.dumps({"type": "token", "text": token}))
-
-            await ws.send_text(json.dumps({"type": "end", "full": generated}))
+        data = await ws.receive_json()
+        engine = get_engine()
+        prompt = data.get("prompt", "")
+        kwargs = {
+            "max_new_tokens": data.get("max_tokens", 256),
+            "temperature":    data.get("temperature", 0.8),
+            "top_k":          data.get("top_k", 50),
+            "top_p":          data.get("top_p", 0.95),
+            "think_rounds":   data.get("think_rounds", 0),
+        }
+        n_tokens = 0
+        async for token in engine.astream(prompt, **kwargs):
+            await ws.send_json({"token": token, "n": n_tokens})
+            n_tokens += 1
+        await ws.send_json({"done": True, "n_tokens": n_tokens})
     except WebSocketDisconnect:
         pass
     except Exception as e:
         try:
-            await ws.send_text(json.dumps({"type": "error", "text": str(e)}))
-        except:
+            await ws.send_json({"error": str(e)})
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/chat")
+async def ws_chat(ws: WebSocket):
+    """Streaming chat WebSocket — maintains conversation history on server."""
+    await ws.accept()
+    history: List[Dict[str, str]] = []
+    try:
+        while True:
+            data = await ws.receive_json()
+            action = data.get("action", "chat")
+
+            if action == "reset":
+                history = []
+                await ws.send_json({"action": "reset", "ok": True})
+                continue
+
+            if action == "learn":
+                engine = get_engine()
+                result = engine.learn(data.get("text", ""), source="ws_chat")
+                await ws.send_json({"action": "learn", **result})
+                continue
+
+            if action == "retrieve":
+                engine = get_engine()
+                results = engine.retrieve(data.get("query", ""), top_k=data.get("top_k", 3))
+                await ws.send_json({"action": "retrieve", "results": results})
+                continue
+
+            # Chat
+            user_msg = data.get("content", "")
+            history.append({"role": "user", "content": user_msg})
+
+            engine = get_engine()
+            agent  = ChatAgent(
+                engine,
+                use_rag      = data.get("use_rag", True),
+                think_rounds = data.get("think_rounds", 0),
+                use_tools    = data.get("use_tools", False),
+            )
+            result = agent.reply(
+                history,
+                max_tokens  = data.get("max_tokens", 512),
+                temperature = data.get("temperature", 0.8),
+            )
+            reply = result["reply"]
+            history.append({"role": "assistant", "content": reply})
+
+            await ws.send_json({
+                "action":    "reply",
+                "content":   reply,
+                "retrieved": result.get("retrieved", []),
+                "thoughts":  result.get("think_thoughts", []),
+                "elapsed_s": result.get("elapsed_s", 0),
+            })
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await ws.send_json({"error": str(e)})
+        except Exception:
             pass
 
 
 @app.websocket("/ws/train")
 async def ws_train(ws: WebSocket):
+    """Push training metrics to WebSocket clients in real time."""
     await ws.accept()
-    state.training_clients.append(ws)
+    _ws_clients.append(ws)
+    last_sent = 0
     try:
-        # Send existing metrics
-        for m in state.training_metrics[-50:]:
-            await ws.send_text(json.dumps({"type": "metrics", "data": m}))
         while True:
-            await asyncio.sleep(1)
+            if len(_train_metrics) > last_sent:
+                metrics = _train_metrics[last_sent:]
+                await ws.send_json({"metrics": metrics})
+                last_sent = len(_train_metrics)
+            await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         pass
     finally:
-        state.training_clients.discard(ws) if hasattr(state.training_clients, 'discard') else None
-        if ws in state.training_clients:
-            state.training_clients.remove(ws)
+        _ws_clients.discard(ws) if hasattr(_ws_clients, "discard") else None
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Web UI
+# ─────────────────────────────────────────────────────────────────────────────
 
-def _training_status() -> Dict:
-    if not state.trainer:
-        return {"running": False, "step": 0, "metrics": []}
-    running = bool(state.training_thread and state.training_thread.is_alive())
-    last = state.training_metrics[-1] if state.training_metrics else {}
-    return {
-        "running": running,
-        "step": last.get("step", 0),
-        "loss": last.get("loss"),
-        "metrics": state.training_metrics[-100:],
+_HTML = """<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NFN AGI v4.0</title>
+<style>
+  :root {
+    --bg: #0a0a0f; --surface: #12121a; --border: #1e1e2e;
+    --accent: #7c3aed; --accent2: #06b6d4; --text: #e2e8f0;
+    --muted: #64748b; --green: #10b981; --red: #ef4444;
+    --yellow: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; height: 100vh; display: flex; flex-direction: column; }
+
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 1.1rem; color: var(--accent); letter-spacing: 0.05em; }
+  .badge { background: var(--border); border-radius: 4px; padding: 2px 8px; font-size: 0.7rem; color: var(--accent2); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); margin-left: auto; }
+
+  .layout { display: flex; flex: 1; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar { width: 280px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px; gap: 16px; overflow-y: auto; }
+  .sidebar h2 { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+  .control-group { display: flex; flex-direction: column; gap: 8px; }
+  label { font-size: 0.75rem; color: var(--muted); }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=number], select, textarea { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 0.8rem; width: 100%; font-family: inherit; }
+  .val { font-size: 0.75rem; color: var(--accent2); float: right; }
+  .sep { border: none; border-top: 1px solid var(--border); }
+  .feature-list { display: flex; flex-direction: column; gap: 4px; }
+  .feature { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .dot.on { background: var(--green); } .dot.off { background: var(--muted); }
+
+  /* Chat area */
+  .chat-area { flex: 1; display: flex; flex-direction: column; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .tab { padding: 10px 20px; font-size: 0.8rem; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  .tab-content.active { display: flex; }
+
+  /* Messages */
+  .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { display: flex; gap: 12px; max-width: 85%; }
+  .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+  .msg .avatar { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; flex-shrink: 0; }
+  .msg.user .avatar { background: var(--accent); }
+  .msg.assistant .avatar { background: var(--accent2); color: #000; }
+  .bubble { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; font-size: 0.85rem; line-height: 1.6; max-width: 100%; }
+  .msg.user .bubble { background: #1e1040; border-color: var(--accent); }
+  .meta { font-size: 0.65rem; color: var(--muted); margin-top: 4px; }
+  .retrieved-ctx { font-size: 0.7rem; color: var(--accent2); margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+  .thoughts-ctx { font-size: 0.7rem; color: var(--yellow); margin-top: 6px; border-top: 1px solid var(--border); padding-top: 6px; }
+  .thinking-indicator { color: var(--yellow); font-style: italic; }
+
+  /* Input area */
+  .input-area { border-top: 1px solid var(--border); padding: 16px; display: flex; gap: 10px; background: var(--surface); }
+  .input-area textarea { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; resize: none; font-family: inherit; height: 60px; }
+  .input-area textarea:focus { outline: none; border-color: var(--accent); }
+  .btn { background: var(--accent); color: white; border: none; border-radius: 8px; padding: 0 20px; cursor: pointer; font-size: 0.85rem; font-family: inherit; transition: opacity 0.15s; white-space: nowrap; }
+  .btn:hover { opacity: 0.85; } .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn.secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+  .btn.danger { background: var(--red); }
+  .btn.cyan { background: var(--accent2); color: #000; }
+
+  /* Memory panel */
+  .memory-panel { flex: 1; overflow-y: auto; padding: 20px; }
+  .memory-entry { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  .memory-entry .score { color: var(--accent2); font-size: 0.75rem; }
+  .memory-entry .text { font-size: 0.8rem; margin-top: 4px; line-height: 1.5; }
+  .search-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+  .search-bar input { flex: 1; }
+
+  /* Think panel */
+  .think-panel { flex: 1; overflow-y: auto; padding: 20px; }
+  .thought-block { background: #1a1025; border: 1px solid #3b1d5c; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .thought-block .round { font-size: 0.7rem; color: var(--yellow); margin-bottom: 6px; }
+  .thought-block .content { font-size: 0.8rem; line-height: 1.5; }
+  .answer-block { background: #0d1f1a; border: 1px solid var(--green); border-radius: 8px; padding: 16px; margin-top: 16px; }
+  .answer-block .label { font-size: 0.7rem; color: var(--green); margin-bottom: 8px; }
+
+  /* Learn panel */
+  .learn-panel { flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .learn-panel textarea { height: 120px; }
+  .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .stat-card .val { font-size: 1.2rem; color: var(--accent2); display: block; margin-top: 4px; }
+
+  pre { white-space: pre-wrap; word-break: break-word; }
+  code { background: #1a1a2e; padding: 2px 6px; border-radius: 4px; font-size: 0.8em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⬡ NFN AGI v4.0</h1>
+  <span class="badge" id="param-badge">loading...</span>
+  <span class="badge" id="memory-badge">0 memories</span>
+  <div class="status-dot" id="status-dot" title="Model status"></div>
+</header>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <h2>Génération</h2>
+    <div class="control-group">
+      <label>Température <span class="val" id="temp-val">0.8</span></label>
+      <input type="range" id="temperature" min="0.1" max="2.0" step="0.05" value="0.8"
+             oninput="document.getElementById('temp-val').textContent=this.value">
+      <label>Top-P <span class="val" id="topp-val">0.95</span></label>
+      <input type="range" id="top_p" min="0.5" max="1.0" step="0.01" value="0.95"
+             oninput="document.getElementById('topp-val').textContent=this.value">
+      <label>Max tokens</label>
+      <input type="number" id="max_tokens" value="512" min="16" max="2048">
+    </div>
+    <hr class="sep">
+    <h2>Capacités AGI</h2>
+    <div class="control-group">
+      <label>Rounds de réflexion <span class="val" id="think-val">0</span></label>
+      <input type="range" id="think_rounds" min="0" max="5" step="1" value="0"
+             oninput="document.getElementById('think-val').textContent=this.value">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="use_tools"> Outils natifs
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="use_rag" checked> Mémoire RAG
+      </label>
+    </div>
+    <hr class="sep">
+    <h2>Features actives</h2>
+    <div class="feature-list" id="feature-list"></div>
+    <hr class="sep">
+    <button class="btn secondary" onclick="resetChat()">↺ Réinitialiser chat</button>
+    <button class="btn secondary" onclick="saveMemory()">💾 Sauvegarder mémoire</button>
+  </div>
+
+  <!-- Main content -->
+  <div class="chat-area">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('chat')">💬 Chat</div>
+      <div class="tab" onclick="switchTab('think')">🧠 Raisonner</div>
+      <div class="tab" onclick="switchTab('memory')">🗂 Mémoire</div>
+      <div class="tab" onclick="switchTab('learn')">📥 Apprendre</div>
+    </div>
+
+    <!-- Chat tab -->
+    <div class="tab-content active" id="tab-chat">
+      <div class="messages" id="messages"></div>
+      <div class="input-area">
+        <textarea id="chat-input" placeholder="Message…" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"></textarea>
+        <button class="btn" id="send-btn" onclick="sendChat()">Envoyer</button>
+        <button class="btn secondary" onclick="clearMessages()">✕</button>
+      </div>
+    </div>
+
+    <!-- Think tab -->
+    <div class="tab-content" id="tab-think">
+      <div class="think-panel" id="think-panel">
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <input type="text" id="think-input" placeholder="Question à raisonner…" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:10px 14px;font-size:0.85rem;font-family:inherit">
+          <select id="think-rounds-select" style="width:120px">
+            <option value="1">1 round</option>
+            <option value="2">2 rounds</option>
+            <option value="3" selected>3 rounds</option>
+            <option value="5">5 rounds</option>
+          </select>
+          <button class="btn cyan" onclick="runThink()">Raisonner</button>
+        </div>
+        <div id="think-results"></div>
+      </div>
+    </div>
+
+    <!-- Memory tab -->
+    <div class="tab-content" id="tab-memory">
+      <div class="memory-panel">
+        <div class="search-bar">
+          <input type="text" id="memory-search" placeholder="Rechercher dans la mémoire…">
+          <button class="btn" onclick="searchMemory()">Chercher</button>
+          <input type="number" id="memory-topk" value="5" min="1" max="20" style="width:60px">
+        </div>
+        <div id="memory-results"></div>
+      </div>
+    </div>
+
+    <!-- Learn tab -->
+    <div class="tab-content" id="tab-learn">
+      <div class="learn-panel">
+        <h2 style="color:var(--text);text-transform:none;letter-spacing:0">Apprendre du nouveau contenu</h2>
+        <textarea id="learn-text" placeholder="Colle ici le texte à apprendre (article, code, documentation, conversation…)"></textarea>
+        <input type="text" id="learn-source" placeholder="Source (optionnel, ex: wikipedia, docs)">
+        <div style="display:flex;gap:8px">
+          <button class="btn" onclick="learnText()">📥 Apprendre</button>
+          <button class="btn secondary" onclick="loadStatus()">↺ Actualiser stats</button>
+        </div>
+        <div id="learn-result" style="font-size:0.8rem;color:var(--green)"></div>
+        <h2 style="color:var(--text);text-transform:none;letter-spacing:0;margin-top:8px">Statistiques mémoire</h2>
+        <div class="stats-grid" id="stats-grid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let history = [];
+let ws = null;
+
+// ── WebSocket chat ───────────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws/chat`);
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.action === 'reply') {
+      addMessage('assistant', data.content, data.retrieved, data.thoughts, data.elapsed_s);
+      document.getElementById('send-btn').disabled = false;
+    } else if (data.action === 'learn') {
+      document.getElementById('learn-result').textContent = `✓ Appris: ${data.chars} chars, ${data.store_size} entrées en mémoire`;
+    } else if (data.action === 'retrieve') {
+      renderMemoryResults(data.results);
+    } else if (data.error) {
+      addMessage('assistant', `[Erreur] ${data.error}`, [], [], 0);
+      document.getElementById('send-btn').disabled = false;
     }
+  };
+  ws.onclose = () => setTimeout(connectWS, 2000);
+}
+
+// ── Tab switching ────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => { t.classList.remove('active'); t.style.display='none'; });
+  const tabs = ['chat','think','memory','learn'];
+  const idx = tabs.indexOf(name);
+  document.querySelectorAll('.tab')[idx].classList.add('active');
+  const el = document.getElementById('tab-'+name);
+  el.classList.add('active'); el.style.display='flex';
+  if (name === 'memory') loadStatus();
+}
+
+// ── Chat ─────────────────────────────────────────────────────────────────────
+function sendChat() {
+  const input = document.getElementById('chat-input');
+  const text  = input.value.trim();
+  if (!text || !ws || ws.readyState !== 1) return;
+  addMessage('user', text);
+  history.push({role:'user', content:text});
+  input.value = '';
+  document.getElementById('send-btn').disabled = true;
+  ws.send(JSON.stringify({
+    action:       'chat',
+    content:      text,
+    temperature:  parseFloat(document.getElementById('temperature').value),
+    top_p:        parseFloat(document.getElementById('top_p').value),
+    max_tokens:   parseInt(document.getElementById('max_tokens').value),
+    think_rounds: parseInt(document.getElementById('think_rounds').value),
+    use_tools:    document.getElementById('use_tools').checked,
+    use_rag:      document.getElementById('use_rag').checked,
+  }));
+}
+
+function addMessage(role, content, retrieved=[], thoughts=[], elapsed=0) {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  const avatar = role === 'user' ? '👤' : '⬡';
+  let extra = '';
+  if (thoughts && thoughts.length > 0) {
+    extra += `<div class="thoughts-ctx">💭 ${thoughts.length} round(s): ${thoughts[0].slice(0,120)}…</div>`;
+  }
+  if (retrieved && retrieved.length > 0) {
+    extra += `<div class="retrieved-ctx">🗂 ${retrieved.length} mémoire(s) retrouvée(s): ${retrieved[0].text.slice(0,80)}…</div>`;
+  }
+  div.innerHTML = `
+    <div class="avatar">${avatar}</div>
+    <div>
+      <div class="bubble"><pre>${escapeHtml(content)}</pre>${extra}</div>
+      <div class="meta">${role === 'assistant' ? `${elapsed}s` : 'maintenant'}</div>
+    </div>`;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  if (role === 'assistant') history.push({role:'assistant', content});
+}
+
+function clearMessages() { document.getElementById('messages').innerHTML = ''; history = []; }
+function resetChat() {
+  clearMessages();
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({action:'reset'}));
+}
+
+// ── Think ─────────────────────────────────────────────────────────────────────
+async function runThink() {
+  const q = document.getElementById('think-input').value.trim();
+  const rounds = parseInt(document.getElementById('think-rounds-select').value);
+  if (!q) return;
+  const panel = document.getElementById('think-results');
+  panel.innerHTML = '<div class="thinking-indicator">⚙ Raisonnement en cours…</div>';
+  try {
+    const r = await fetch('/api/think', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:q, n_rounds:rounds, temperature:0.7}),
+    });
+    const data = await r.json();
+    let html = data.thoughts.map((t,i) =>
+      `<div class="thought-block"><div class="round">Round ${i+1}</div><div class="content">${escapeHtml(t)}</div></div>`
+    ).join('');
+    html += `<div class="answer-block"><div class="label">✓ Réponse finale</div><pre>${escapeHtml(data.answer)}</pre></div>`;
+    html += `<div class="meta" style="margin-top:8px;color:var(--muted);">${data.elapsed_s}s</div>`;
+    panel.innerHTML = html;
+  } catch(e) { panel.innerHTML = `<div style="color:var(--red)">${e}</div>`; }
+}
+
+// ── Memory ────────────────────────────────────────────────────────────────────
+async function searchMemory() {
+  const q = document.getElementById('memory-search').value.trim();
+  const k = parseInt(document.getElementById('memory-topk').value);
+  if (!q) return;
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({action:'retrieve', query:q, top_k:k}));
+  } else {
+    const r = await fetch('/api/retrieve', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,top_k:k})});
+    const data = await r.json();
+    renderMemoryResults(data.results);
+  }
+}
+
+function renderMemoryResults(results) {
+  const el = document.getElementById('memory-results');
+  if (!results || results.length === 0) { el.innerHTML = '<div style="color:var(--muted)">Aucun résultat.</div>'; return; }
+  el.innerHTML = results.map(r =>
+    `<div class="memory-entry"><div class="score">Score: ${r.score}</div><div class="text">${escapeHtml(r.text)}</div></div>`
+  ).join('');
+}
+
+// ── Learn ─────────────────────────────────────────────────────────────────────
+async function learnText() {
+  const text   = document.getElementById('learn-text').value.trim();
+  const source = document.getElementById('learn-source').value.trim() || 'user';
+  if (!text) return;
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({action:'learn', text, source}));
+  } else {
+    const r = await fetch('/api/learn',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,source})});
+    const data = await r.json();
+    document.getElementById('learn-result').textContent = `✓ Appris: ${data.chars} chars, ${data.store_size} entrées en mémoire`;
+  }
+  await loadStatus();
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const data = await r.json();
+    document.getElementById('param-badge').textContent = `${data.params_M}M params`;
+    document.getElementById('memory-badge').textContent = `${data.knowledge_entries} mémoires`;
+
+    // Feature list
+    const fl = document.getElementById('feature-list');
+    fl.innerHTML = Object.entries(data.features || {}).map(([k,v]) =>
+      `<div class="feature"><div class="dot ${v?'on':'off'}"></div>${k.replace(/_/g,' ')}</div>`
+    ).join('');
+
+    // Stats grid
+    const sg = document.getElementById('stats-grid');
+    sg.innerHTML = `
+      <div class="stat-card"><label>Paramètres</label><span class="val">${data.params_M}M</span></div>
+      <div class="stat-card"><label>d_model</label><span class="val">${data.d_model}</span></div>
+      <div class="stat-card"><label>Blocs</label><span class="val">${data.n_blocks}</span></div>
+      <div class="stat-card"><label>Vocab</label><span class="val">${data.vocab_size}</span></div>
+      <div class="stat-card"><label>Mémoires</label><span class="val">${data.knowledge_entries}</span></div>
+      <div class="stat-card"><label>Outils</label><span class="val">${(data.tools||[]).length}</span></div>
+    `;
+    document.getElementById('status-dot').style.background = 'var(--green)';
+  } catch(e) {
+    document.getElementById('status-dot').style.background = 'var(--red)';
+  }
+}
+
+async function saveMemory() {
+  const r = await fetch('/api/memory/save',{method:'POST'});
+  const data = await r.json();
+  alert(`Mémoire sauvegardée: ${data.entries} entrées → ${data.saved}`);
+}
+
+function escapeHtml(t) {
+  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+connectWS();
+loadStatus();
+// Init all tab-contents as hidden except first
+document.querySelectorAll('.tab-content').forEach((el,i) => { if(i>0) el.style.display='none'; });
+</script>
+</body>
+</html>
+"""
 
 
-async def _safe_ws_send(ws: WebSocket, msg: str):
-    try:
-        await ws.send_text(msg)
-    except:
-        pass
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return HTMLResponse(_HTML)

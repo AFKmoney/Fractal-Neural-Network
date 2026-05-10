@@ -91,6 +91,18 @@ class EfficientNFNBlock(nn.Module):
             dropout          = cfg.dropout,
         )
 
+        # ── 4. Optional SSM layer (Mamba-style selective recurrence) ────────
+        self.ssm = None
+        if getattr(cfg, "use_ssm", False):
+            from .ssm import SSMBlock
+            self.ssm = SSMBlock(
+                d_model  = d,
+                d_state  = getattr(cfg, "ssm_d_state", 16),
+                d_conv   = getattr(cfg, "ssm_d_conv",   4),
+                expand   = getattr(cfg, "ssm_expand",   2),
+                dropout  = cfg.dropout,
+            )
+
         # Level index affects feature map (Mandelbrot frequency selection)
         self.block_idx = block_idx
         self.norm1 = nn.LayerNorm(d)
@@ -106,6 +118,9 @@ class EfficientNFNBlock(nn.Module):
         x = self.soliton(x)
         # 3. MoE FFN (pre-norm)
         x = self.moe(self.norm2(x))
+        # 4. SSM (optional selective recurrence — O(1) per token at inference)
+        if self.ssm is not None:
+            x = self.ssm(x)
         return x
 
 

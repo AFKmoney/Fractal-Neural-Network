@@ -1,344 +1,411 @@
 """
-NFN Agents — Chat, Code, and Reasoning agents powered by NFNInferenceEngine.
+NFN AGI Agents v4.0
 
-ChatAgent     : multi-turn conversational assistant
-CodeAgent     : code completion / generation / explanation
-ReasoningAgent: step-by-step ReAct-style reasoning with tool use
+Agents built on AGIInferenceEngine:
+
+  ChatAgent      — multi-turn conversation with persistent episodic memory
+                   automatically retrieves relevant past context (RAG)
+  ThinkAgent     — exposes internal reasoning rounds, shows think() in action
+  ToolAgent      — ReAct-style with real tools via ToolCallingModel
+  LearnAgent     — interactive continual learning from conversation
 """
 
-import ast
 import json
-import re
-import traceback
+import time
 from typing import Any, Dict, List, Optional
 
-from inference.engine import NFNInferenceEngine
+from inference.engine import AGIInferenceEngine
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chat Agent
+# Chat Agent — persistent memory, RAG retrieval
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ChatAgent:
-    """Simple stateless chat agent — builds prompt from message history."""
+    """
+    Multi-turn conversational agent with episodic memory.
+
+    Each turn:
+      1. Retrieve relevant past context from KnowledgeStore (RAG)
+      2. Build prompt from system + retrieved context + conversation history
+      3. Generate reply with episodic write-through
+      4. Optionally learn the turn (user message → episodic memory)
+    """
 
     SYSTEM = (
-        "Tu es NFN (Neural Fractal Network), un assistant IA avancé basé sur une "
-        "architecture neuronale fractale. Tu es curieux, précis, et capable de raisonner "
-        "à plusieurs niveaux d'abstraction. Réponds en français ou dans la langue de l'utilisateur."
+        "Tu es NFN (Neural Fractal Network), une intelligence artificielle avancée "
+        "basée sur une architecture fractale avec mémoire épisodique et raisonnement causal. "
+        "Tu te souviens des conversations passées, tu raisonnes à plusieurs niveaux d'abstraction, "
+        "et tu peux appeler des outils externes. "
+        "Réponds avec précision, curiosité, et profondeur."
     )
 
-    def __init__(self, engine: NFNInferenceEngine):
-        self.engine = engine
+    def __init__(
+        self,
+        engine: AGIInferenceEngine,
+        use_rag: bool      = True,
+        rag_top_k: int     = 3,
+        learn_turns: bool  = True,   # write each user turn to episodic memory
+        think_rounds: int  = 0,      # 0 = no thinking, >0 = internal reasoning
+        use_tools: bool    = False,
+    ):
+        self.engine      = engine
+        self.use_rag     = use_rag
+        self.rag_top_k   = rag_top_k
+        self.learn_turns = learn_turns
+        self.think_rounds = think_rounds
+        self.use_tools   = use_tools
 
     def reply(
         self,
         messages: List[Dict[str, str]],
         system: Optional[str] = None,
-        max_tokens: int = 400,
+        max_tokens: int   = 512,
         temperature: float = 0.8,
-        top_k: int = 50,
-        top_p: float = 0.95,
-    ) -> str:
-        return self.engine.chat(
+        top_k: int        = 50,
+        top_p: float      = 0.95,
+    ) -> Dict[str, Any]:
+        """
+        Generate a reply.
+        Returns {
+            "reply": str,
+            "retrieved": [...],
+            "think_thoughts": [...],
+            "elapsed_s": float,
+        }
+        """
+        t0 = time.time()
+        sys_text = system or self.SYSTEM
+
+        # Optionally learn the latest user message
+        user_text = next(
+            (m["content"] for m in reversed(messages) if m["role"] == "user"),
+            None,
+        )
+        if self.learn_turns and user_text:
+            self.engine.learn(user_text, source="conversation")
+
+        # Retrieve relevant memories
+        retrieved = []
+        if self.use_rag and user_text:
+            retrieved = self.engine.retrieve(user_text, top_k=self.rag_top_k)
+
+        # Inject retrieved context into system prompt
+        if retrieved:
+            ctx = "\n".join(
+                f"[Mémoire {i+1} (score={r['score']:.2f})]: {r['text']}"
+                for i, r in enumerate(retrieved)
+            )
+            sys_text = sys_text + f"\n\nContexte de ta mémoire:\n{ctx}"
+
+        # Optional internal thinking
+        thoughts = []
+        if self.think_rounds > 0 and user_text:
+            result   = self.engine.think(user_text, n_rounds=self.think_rounds)
+            thoughts = result["thoughts"]
+            # Prepend thinking summary to system
+            thought_summary = " → ".join(
+                t[:80] + "..." if len(t) > 80 else t for t in thoughts
+            )
+            sys_text = sys_text + f"\n\n[Raisonnement interne]: {thought_summary}"
+
+        reply_text = self.engine.chat(
             messages,
-            system=system or self.SYSTEM,
+            system=sys_text,
             max_new_tokens=max_tokens,
             temperature=temperature,
             top_k=top_k,
             top_p=top_p,
+            use_tools=self.use_tools,
+            write_memory=True,
         )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Code Agent
-# ─────────────────────────────────────────────────────────────────────────────
-
-class CodeAgent:
-    """
-    Code completion and generation agent.
-
-    Supports:
-      - complete : continue an incomplete code snippet
-      - explain  : describe what code does
-      - refactor : suggest improvements
-      - generate : create code from a description
-    """
-
-    def __init__(self, engine: NFNInferenceEngine):
-        self.engine = engine
-
-    def _build_prompt(self, instruction: str, code: str, language: str, task: str) -> str:
-        lang_tag = language.lower()
-        if task == "complete":
-            return (
-                f"<sys>Tu es un expert en {language}. Complète le code suivant.</sys>\n"
-                f"<usr>Complète ce code {language}:\n```{lang_tag}\n{code}\n```</usr>\n"
-                f"<ast>```{lang_tag}\n{code}"
-            )
-        elif task == "explain":
-            return (
-                f"<sys>Tu es un expert en {language}. Explique le code.</sys>\n"
-                f"<usr>Explique ce code:\n```{lang_tag}\n{code}\n```</usr>\n"
-                f"<ast>Ce code"
-            )
-        elif task == "refactor":
-            return (
-                f"<sys>Tu es un expert en {language}. Propose une version améliorée.</sys>\n"
-                f"<usr>Refactorise:\n```{lang_tag}\n{code}\n```\n{instruction}</usr>\n"
-                f"<ast>Version améliorée:\n```{lang_tag}\n"
-            )
-        else:  # generate
-            return (
-                f"<sys>Tu es un expert développeur {language}.</sys>\n"
-                f"<usr>{instruction}</usr>\n"
-                f"<ast>```{lang_tag}\n"
-            )
-
-    def complete(
-        self,
-        code: str,
-        instruction: str = "",
-        language: str = "python",
-        max_tokens: int = 500,
-        temperature: float = 0.4,
-    ) -> Dict[str, Any]:
-        task = "complete" if not instruction else "generate"
-        prompt = self._build_prompt(instruction, code, language, task)
-        result = self.engine.generate(
-            prompt, max_new_tokens=max_tokens,
-            temperature=temperature, top_k=40, top_p=0.9,
-        )
         return {
-            "language": language,
-            "task": task,
-            "result": result,
-            "prompt": prompt,
+            "reply":          reply_text,
+            "retrieved":      retrieved,
+            "think_thoughts": thoughts,
+            "elapsed_s":      round(time.time() - t0, 3),
         }
 
-    def explain(self, code: str, language: str = "python", max_tokens: int = 300) -> Dict:
-        prompt = self._build_prompt("", code, language, "explain")
-        result = self.engine.generate(prompt, max_new_tokens=max_tokens, temperature=0.5)
-        return {"explanation": result, "language": language}
-
-    def refactor(self, code: str, instruction: str = "", language: str = "python",
-                 max_tokens: int = 500) -> Dict:
-        prompt = self._build_prompt(instruction, code, language, "refactor")
-        result = self.engine.generate(prompt, max_new_tokens=max_tokens, temperature=0.3)
-        return {"refactored": result, "language": language}
-
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Reasoning Agent (ReAct-style)
+# Think Agent — exposes internal reasoning transparently
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ReasoningAgent:
+class ThinkAgent:
     """
-    A ReAct-style agent that decomposes goals into steps and uses tools.
+    Exposes NFN's internal thinking process.
 
-    Tools available:
-      - calculate(expr)  : safe Python math evaluation
-      - search(query)    : searches the built-in knowledge base
-      - think(thought)   : explicit reasoning step
-      - answer(text)     : final answer
+    Shows:
+      - Goal phase set from the prompt
+      - N rounds of internal reasoning (RecursiveReasoner)
+      - Free energy / belief compression per round
+      - Final answer after reasoning
+    """
+
+    def __init__(self, engine: AGIInferenceEngine, default_rounds: int = 3):
+        self.engine = engine
+        self.default_rounds = default_rounds
+
+    def think_and_answer(
+        self,
+        question: str,
+        n_rounds: Optional[int] = None,
+        max_answer_tokens: int = 512,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
+    ) -> Dict[str, Any]:
+        """
+        Returns {
+            "question": str,
+            "thoughts": [str],        # one per round
+            "answer": str,
+            "elapsed_s": float,
+        }
+        """
+        t0     = time.time()
+        rounds = n_rounds or self.default_rounds
+
+        think_result = self.engine.think(question, n_rounds=rounds)
+        thoughts     = think_result["thoughts"]
+        final_prompt = think_result["final_prompt"]
+
+        answer = self.engine.generate(
+            final_prompt + "\nRéponse:",
+            max_new_tokens=max_answer_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            write_memory=True,
+        )
+
+        return {
+            "question":  question,
+            "thoughts":  thoughts,
+            "answer":    answer.strip(),
+            "elapsed_s": round(time.time() - t0, 3),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool Agent — ReAct-style with real tools
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ToolAgent:
+    """
+    Agentic task solver using ToolCallingModel.
+
+    The model generates text freely; when it emits a <tool_call> block,
+    the tool is dispatched and the result is injected back into context.
+
+    You can add custom tools via engine.register_tool(...).
     """
 
     SYSTEM = (
-        "Tu es NFN-Agent, un agent de raisonnement basé sur le Neural Fractal Network. "
-        "Tu résous des problèmes étape par étape en utilisant le format:\n"
-        "Réflexion: [ta réflexion]\n"
-        "Action: [outil]([paramètres])\n"
-        "Observation: [résultat]\n"
-        "... (répète si nécessaire)\n"
-        "Réponse finale: [ta réponse]\n\n"
-        "Outils disponibles: calculate(expr), search(query), think(thought), answer(text)"
+        "Tu es NFN-Agent, un agent IA avancé capable de résoudre des tâches complexes "
+        "en combinant raisonnement interne, mémoire épisodique, et appels d'outils externes.\n"
+        "Résous les problèmes étape par étape. Quand tu as besoin d'un calcul ou d'une "
+        "opération précise, utilise les outils disponibles."
     )
 
-    KNOWLEDGE_BASE = {
-        "nfn": (
-            "Le Neural Fractal Network (NFN) est une architecture neuronale à topologie fractale "
-            "avec des connexions sinusoïdales paramétriques (A·sin(ωt+φ)). Il combine "
-            "auto-similarité, oscillations de phase, et apprentissage profond."
-        ),
-        "fractal": (
-            "Une fractale est une structure géométrique dont chaque partie est une copie "
-            "à échelle réduite de l'ensemble. Exemples: Sierpinski, Cantor, Mandelbrot."
-        ),
-        "transformer": (
-            "Le Transformer est une architecture de réseau de neurones basée sur l'attention "
-            "multi-têtes, introduite par Vaswani et al. en 2017."
-        ),
-        "agi": (
-            "L'Intelligence Artificielle Générale (AGI) désigne une IA capable d'effectuer "
-            "n'importe quelle tâche intellectuelle humaine avec des capacités générales."
-        ),
-    }
-
-    def __init__(self, engine: NFNInferenceEngine):
+    def __init__(self, engine: AGIInferenceEngine):
         self.engine = engine
 
-    # ── Tools ─────────────────────────────────────────────────────────────────
-
-    def _safe_eval(self, expr: str) -> Any:
-        import ast
-        import operator
-        import math
-
-        allowed_ops = {
-            ast.Add: operator.add, ast.Sub: operator.sub,
-            ast.Mult: operator.mul, ast.Div: operator.truediv,
-            ast.FloorDiv: operator.floordiv, ast.Pow: operator.pow,
-            ast.Mod: operator.mod, ast.USub: operator.neg,
-            ast.UAdd: operator.pos
-        }
-
-        allowed_funcs = {
-            "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
-            **{k: v for k, v in vars(math).items() if not k.startswith("_") and callable(v)}
-        }
-
-        allowed_names = {
-            "e": math.e, "pi": math.pi, "tau": math.tau, "inf": math.inf, "nan": math.nan
-        }
-
-        def _eval_node(node):
-            if isinstance(node, ast.Expression):
-                return _eval_node(node.body)
-            elif isinstance(node, ast.Constant):
-                return node.value
-            elif isinstance(node, ast.BinOp):
-                left = _eval_node(node.left)
-                right = _eval_node(node.right)
-                return allowed_ops[type(node.op)](left, right)
-            elif isinstance(node, ast.UnaryOp):
-                operand = _eval_node(node.operand)
-                return allowed_ops[type(node.op)](operand)
-            elif isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name) and node.func.id in allowed_funcs:
-                    args = [_eval_node(arg) for arg in node.args]
-                    return allowed_funcs[node.func.id](*args)
-                raise ValueError("Appel de fonction non autorisé")
-            elif isinstance(node, ast.Name):
-                if node.id in allowed_names:
-                    return allowed_names[node.id]
-                raise ValueError(f"Variable non autorisée: {node.id}")
-            elif isinstance(node, ast.List):
-                return [_eval_node(elt) for elt in node.elts]
-            elif isinstance(node, ast.Tuple):
-                return tuple(_eval_node(elt) for elt in node.elts)
-            else:
-                raise TypeError(f"Opération non supportée: {type(node).__name__}")
-
-        tree = ast.parse(expr, mode='eval')
-        return _eval_node(tree)
-
-    def _tool_calculate(self, expr: str) -> str:
-        try:
-            result = self._safe_eval(expr)
-            return str(result)
-        except Exception as e:
-            return f"Erreur de calcul: {e}"
-
-    def _tool_search(self, query: str) -> str:
-        q = query.lower()
-        for key, val in self.KNOWLEDGE_BASE.items():
-            if key in q:
-                return val
-        return f"Aucune information trouvée pour '{query}'."
-
-    def _tool_think(self, thought: str) -> str:
-        return f"[Réflexion enregistrée: {thought}]"
-
-    def _parse_action(self, text: str):
-        """Extract tool name and args from 'tool(args)' pattern."""
-        m = re.search(r'(\w+)\(([^)]*)\)', text)
-        if not m:
-            return None, None
-        tool = m.group(1).strip()
-        args = m.group(2).strip().strip('"\'')
-        return tool, args
-
-    def _execute_tool(self, tool: str, args: str) -> str:
-        if tool == "calculate":
-            return self._tool_calculate(args)
-        elif tool == "search":
-            return self._tool_search(args)
-        elif tool == "think":
-            return self._tool_think(args)
-        elif tool == "answer":
-            return args
-        else:
-            return f"Outil inconnu: {tool}"
-
-    # ── Main run loop ─────────────────────────────────────────────────────────
-
-    async def run(
+    def run(
         self,
-        goal: str,
-        history: List[Dict] = [],
-        max_steps: int = 5,
+        task: str,
+        system: Optional[str] = None,
+        max_new_tokens: int = 1024,
+        temperature: float = 0.7,
+        top_p: float = 0.95,
     ) -> Dict[str, Any]:
-        steps = []
-        prompt = (
-            f"<sys>{self.SYSTEM}</sys>\n"
-            f"<usr>Objectif: {goal}</usr>\n"
-            f"<ast>Réflexion: Je vais analyser ce problème méthodiquement.\n"
+        """
+        Run the tool agent on a task.
+        Returns {"task": str, "result": str, "elapsed_s": float}
+        """
+        t0 = time.time()
+        sys_text = system or self.SYSTEM
+
+        result = self.engine.tool_model.generate(
+            prompt=task,
+            system_prompt=sys_text,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
         )
 
-        final_answer = ""
-
-        for step_idx in range(max_steps):
-            # Generate next step
-            continuation = self.engine.generate(
-                prompt,
-                max_new_tokens=150,
-                temperature=0.5,
-                top_k=40,
-                top_p=0.9,
-            )
-
-            # Parse action
-            action_match = re.search(r'Action:\s*(.+)', continuation)
-            if not action_match:
-                # No action found — assume final answer
-                answer_match = re.search(r'Réponse finale:\s*(.+)', continuation, re.DOTALL)
-                final_answer = answer_match.group(1).strip() if answer_match else continuation.strip()
-                steps.append({
-                    "step": step_idx + 1,
-                    "thought": continuation,
-                    "action": None,
-                    "observation": None,
-                    "final": True,
-                })
-                break
-
-            action_str = action_match.group(1).strip()
-            tool, args = self._parse_action(action_str)
-            observation = self._execute_tool(tool, args) if tool else "Action non reconnue."
-
-            step = {
-                "step": step_idx + 1,
-                "thought": continuation,
-                "action": action_str,
-                "tool": tool,
-                "args": args,
-                "observation": observation,
-                "final": False,
-            }
-            steps.append(step)
-
-            # Check for final answer
-            if tool == "answer":
-                final_answer = args
-                step["final"] = True
-                break
-
-            # Extend prompt with observation
-            prompt += f"{continuation}\nObservation: {observation}\nRéflexion: "
+        # Also learn from this interaction
+        self.engine.learn(f"Task: {task}\nResult: {result}", source="agent_run")
 
         return {
-            "goal": goal,
-            "steps": steps,
-            "final_answer": final_answer or (steps[-1]["thought"] if steps else ""),
-            "n_steps": len(steps),
+            "task":      task,
+            "result":    result,
+            "elapsed_s": round(time.time() - t0, 3),
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Learn Agent — interactive continual learning
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LearnAgent:
+    """
+    Interactive continual learning agent.
+
+    Commands:
+      learn(text, source)      → store text in episodic memory
+      retrieve(query, top_k)   → find relevant memories
+      rag(prompt)              → generate with retrieval augmentation
+      stats()                  → memory statistics
+      save(path)               → persist knowledge store
+    """
+
+    def __init__(self, engine: AGIInferenceEngine):
+        self.engine = engine
+
+    def learn(self, text: str, source: str = "user") -> Dict:
+        return self.engine.learn(text, source=source)
+
+    def retrieve(self, query: str, top_k: int = 4) -> List[Dict]:
+        return self.engine.retrieve(query, top_k=top_k)
+
+    def rag(
+        self,
+        prompt: str,
+        top_k: int = 3,
+        max_new_tokens: int = 256,
+        temperature: float = 0.8,
+    ) -> str:
+        return self.engine.generate_with_rag(
+            prompt, top_k=top_k,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+        )
+
+    def stats(self) -> Dict:
+        return {
+            **self.engine.learner.stats(),
+            **{"tools": list(self.engine.registry._tools.keys())},
+        }
+
+    def save(self, path: str) -> str:
+        self.engine.learner.save_store(path)
+        return path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Code Agent (kept for API compatibility)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CodeAgent:
+    """Code completion / generation / explanation."""
+
+    def __init__(self, engine: AGIInferenceEngine):
+        self.engine = engine
+
+    def complete(self, code: str, language: str = "python", max_tokens: int = 512) -> str:
+        prompt = (
+            f"<system>Tu es un expert {language}. Complète le code.</system>\n"
+            f"<user>```{language}\n{code}\n```</user>\n"
+            f"<assistant>```{language}\n{code}"
+        )
+        return self.engine.generate(prompt, max_new_tokens=max_tokens, temperature=0.3)
+
+    def explain(self, code: str, language: str = "python", max_tokens: int = 300) -> str:
+        prompt = (
+            f"<system>Tu es un expert {language}. Explique ce code.</system>\n"
+            f"<user>```{language}\n{code}\n```</user>\n"
+            f"<assistant>Ce code"
+        )
+        return self.engine.generate(prompt, max_new_tokens=max_tokens, temperature=0.5)
+
+    def generate(self, description: str, language: str = "python", max_tokens: int = 512) -> str:
+        prompt = (
+            f"<system>Expert {language}.</system>\n"
+            f"<user>{description}</user>\n"
+            f"<assistant>```{language}\n"
+        )
+        return self.engine.generate(prompt, max_new_tokens=max_tokens, temperature=0.4)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reasoning Agent (ReAct-style, kept for API compatibility)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ReasoningAgent(ToolAgent):
+    """Alias for ToolAgent — backwards compatible."""
+
+    # Allowed names for sandboxed math evaluation
+    _MATH_SAFE = {
+        "abs": abs, "round": round, "min": min, "max": max,
+        "sum": sum, "pow": pow, "len": len, "int": int, "float": float,
+    }
+    _MATH_BLOCKED = frozenset([
+        "__import__", "__builtins__", "eval", "exec", "compile",
+        "open", "getattr", "setattr", "delattr", "globals", "locals",
+        "vars", "dir", "type", "object", "print", "input",
+    ])
+
+    def _tool_calculate(self, expression: str) -> str:
+        """
+        Safe sandboxed math evaluator.
+
+        Supports arithmetic, builtins (abs, round, min, max, sum, pow),
+        and the full math module.  Blocks any access to dunders, system
+        calls, function/class definitions, and attribute access.
+        """
+        import math, ast
+
+        expr = expression.strip()
+
+        # Block obvious injection patterns before even parsing
+        for blocked in self._MATH_BLOCKED:
+            if blocked in expr:
+                return f"Erreur: '{blocked}' non autorisé"
+        if "__" in expr:
+            return "Erreur: accès aux attributs spéciaux non autorisé"
+        if any(kw in expr for kw in ("def ", "class ", "lambda ", "import ")):
+            return "Erreur: déclarations non autorisées"
+
+        # Build safe namespace: builtins + math module contents
+        # math.pow always returns float (matches test expectations for pow(2,3)='8.0')
+        safe_ns: Dict = {k: v for k, v in vars(math).items()
+                         if not k.startswith("_")}
+        safe_ns.update(self._MATH_SAFE)
+        safe_ns["pow"] = math.pow   # override builtin pow → always float
+
+        try:
+            tree = ast.parse(expr, mode="eval")
+        except SyntaxError as e:
+            return f"Erreur: syntaxe invalide — {e}"
+
+        # AST whitelist: only allow safe node types
+        _allowed = (
+            ast.Expression, ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare,
+            ast.Call, ast.Constant, ast.List, ast.Tuple,
+            ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
+            ast.Pow, ast.USub, ast.UAdd, ast.And, ast.Or, ast.Not,
+            ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+            ast.Load, ast.Name, ast.keyword,
+        )
+        for node in ast.walk(tree):
+            if not isinstance(node, _allowed):
+                return f"Erreur: opération non autorisée ({type(node).__name__})"
+            if isinstance(node, ast.Name) and node.id not in safe_ns:
+                return f"Erreur: '{node.id}' non autorisé"
+            if isinstance(node, ast.Attribute):
+                return "Erreur: accès aux attributs non autorisé"
+
+        try:
+            result = eval(compile(tree, "<calc>", "eval"), {"__builtins__": {}}, safe_ns)
+            return str(result)
+        except Exception as e:
+            return f"Erreur: {e}"
+
+    async def run(self, goal: str, history=None, max_steps: int = 5) -> Dict:
+        result = super().run(goal, max_new_tokens=max_steps * 200)
+        return {
+            "goal":         goal,
+            "steps":        [],
+            "final_answer": result["result"],
+            "n_steps":      0,
         }

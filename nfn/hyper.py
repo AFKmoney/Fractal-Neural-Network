@@ -199,14 +199,20 @@ class ContextHyperNet(nn.Module):
     def encode_context(
         self,
         h:          torch.Tensor,            # [B, L, d]
-        goal_phase: Optional[torch.Tensor],  # [B, n_phases] or None
+        goal_phase: Optional[torch.Tensor],  # [*, n_phases] or None
     ) -> torch.Tensor:
         """Returns context embedding z [B, z_dim]."""
         h_summary = h.mean(1)                # [B, d]
-        if goal_phase is None:
-            goal_phase = torch.zeros(
-                h.shape[0], self.n_phases, device=h.device
-            )
+        B = h_summary.shape[0]
+        if goal_phase is None or goal_phase.shape[0] == 0:
+            goal_phase = torch.zeros(B, self.n_phases, device=h.device)
+        elif goal_phase.shape[0] != B:
+            # Batch-size mismatch (e.g. goal set with B=1, now used with B>1).
+            # Expand if stored batch=1, else reset to zeros.
+            if goal_phase.shape[0] == 1:
+                goal_phase = goal_phase.expand(B, -1)
+            else:
+                goal_phase = torch.zeros(B, self.n_phases, device=h.device)
         inp = torch.cat([h_summary, goal_phase], dim=-1)   # [B, d+n_phases]
         return self.encoder(inp)                             # [B, z_dim]
 
