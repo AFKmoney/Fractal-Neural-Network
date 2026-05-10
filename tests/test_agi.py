@@ -413,7 +413,9 @@ def test_agi_trainer_one_step(full_model):
         agi_loss_start_step=0,
         agi_loss_ramp_steps=1,
         goal_set_every=1,
-        consolidate_every=1,
+        sleep_every=1,
+        use_self_play=False,
+        use_critique=False,
     )
     text = "the quick brown fox " * 100
     history = trainer.train(
