@@ -18,3 +18,4 @@ data/
 *.log
 .nfn_runtime.json
 /tmp/
+.claude/
