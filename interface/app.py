@@ -956,3 +956,236 @@ document.querySelectorAll('.tab-content').forEach((el,i) => { if(i>0) el.style.d
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return HTMLResponse(_HTML)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Web Explorer & Test-Time Learning (TTL) routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+try:
+    from nfn.web_explorer import WebExplorer as _WebExplorerClass
+    _explorer = _WebExplorerClass()
+except Exception:
+    _explorer = None  # type: ignore[assignment]
+
+_online_learner: Optional["OnlineLearner"] = None  # noqa: F821
+_explore_clients: List[WebSocket] = []
+
+
+# ── Request models ────────────────────────────────────────────────────────────
+
+class ExploreUrlRequest(BaseModel):
+    url:   str
+    adapt: bool = True
+
+class ExploreTextRequest(BaseModel):
+    text: str
+
+class TTLEnableRequest(BaseModel):
+    adapter_rank: int   = 8
+    online_lr:    float = 2e-4
+    n_steps:      int   = 4
+    ppl_gate:     float = 30.0
+
+
+# ── /api/explore/url ─────────────────────────────────────────────────────────
+
+@app.post("/api/explore/url")
+async def explore_url(req: ExploreUrlRequest):
+    if _explorer is None:
+        return JSONResponse({"error": "WebExplorer not available"}, status_code=503)
+
+    try:
+        page = await asyncio.to_thread(_explorer.fetch, req.url)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    result = {
+        "url":          page.get("url", req.url),
+        "title":        page.get("title", ""),
+        "n_chars":      page.get("n_chars", 0),
+        "ppl_before":   None,
+        "ppl_after":    None,
+        "skipped":      True,
+        "text_preview": page.get("text", "")[:200],
+        "error":        page.get("error"),
+    }
+
+    if req.adapt and _online_learner is not None and not page.get("error"):
+        text = page.get("text", "")
+        if text:
+            try:
+                stats = await asyncio.to_thread(_online_learner.adapt_from_text, text)
+                result["ppl_before"] = stats.get("ppl")
+                result["skipped"]    = stats.get("skipped", True)
+                result["ppl_after"]  = stats.get("loss")   # proxy
+            except Exception as e:
+                result["adapt_error"] = str(e)
+
+    return JSONResponse(result)
+
+
+# ── /api/explore/text ────────────────────────────────────────────────────────
+
+@app.post("/api/explore/text")
+async def explore_text(req: ExploreTextRequest):
+    if _online_learner is None:
+        return JSONResponse({"error": "TTL not enabled — call /api/ttl/enable first"}, status_code=400)
+    try:
+        stats = await asyncio.to_thread(_online_learner.adapt_from_text, req.text)
+        return JSONResponse(stats)
+    except Exception as e:
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
+
+
+# ── /ws/explore ──────────────────────────────────────────────────────────────
+
+@app.websocket("/ws/explore")
+async def ws_explore(ws: WebSocket):
+    """
+    Client sends:
+      {"seed_url": str, "n_pages": int, "keywords": [str]}
+
+    Server streams:
+      {"type": "page",  "url", "title", "n_chars", "ppl_before", "ppl_after", "skipped"}
+      {"type": "done",  "n_pages", "total_chars"}
+      {"type": "error", "url", "error"}
+    """
+    await ws.accept()
+    _explore_clients.append(ws)
+    try:
+        data = await ws.receive_json()
+        seed_url = data.get("seed_url", "")
+        n_pages  = int(data.get("n_pages", 5))
+        keywords = data.get("keywords", [])
+
+        if not seed_url:
+            await ws.send_json({"type": "error", "url": "", "error": "seed_url is required"})
+            return
+
+        if _explorer is None:
+            await ws.send_json({"type": "error", "url": seed_url, "error": "WebExplorer not available"})
+            return
+
+        total_chars = 0
+        pages_done  = 0
+        visited: set = set()
+
+        # Generator runs in a thread; we iterate asynchronously
+        def _run_explore():
+            return list(_explorer.explore(seed_url, n_pages=n_pages,
+                                          keywords=keywords, visited=visited))
+
+        pages = await asyncio.to_thread(_run_explore)
+
+        for page in pages:
+            if page.get("error"):
+                await ws.send_json({
+                    "type":  "error",
+                    "url":   page.get("url", ""),
+                    "error": page["error"],
+                })
+                continue
+
+            ppl_before = None
+            ppl_after  = None
+            skipped    = True
+
+            if _online_learner is not None:
+                text = page.get("text", "")
+                if text:
+                    try:
+                        stats = await asyncio.to_thread(
+                            _online_learner.adapt_from_text, text
+                        )
+                        ppl_before = stats.get("ppl")
+                        skipped    = stats.get("skipped", True)
+                        ppl_after  = stats.get("loss")
+                    except Exception:
+                        pass
+
+            total_chars += page.get("n_chars", 0)
+            pages_done  += 1
+
+            await ws.send_json({
+                "type":      "page",
+                "url":       page.get("url", ""),
+                "title":     page.get("title", ""),
+                "n_chars":   page.get("n_chars", 0),
+                "ppl_before": ppl_before,
+                "ppl_after":  ppl_after,
+                "skipped":   skipped,
+            })
+
+        await ws.send_json({
+            "type":        "done",
+            "n_pages":     pages_done,
+            "total_chars": total_chars,
+        })
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await ws.send_json({"type": "error", "url": "", "error": str(e)})
+        except Exception:
+            pass
+    finally:
+        try:
+            _explore_clients.remove(ws)
+        except ValueError:
+            pass
+
+
+# ── /api/ttl/stats ───────────────────────────────────────────────────────────
+
+@app.get("/api/ttl/stats")
+async def ttl_stats():
+    if _online_learner is None:
+        return JSONResponse({"enabled": False})
+    s = _online_learner.stats()
+    s["enabled"] = True
+    return JSONResponse(s)
+
+
+# ── /api/ttl/enable ──────────────────────────────────────────────────────────
+
+@app.post("/api/ttl/enable")
+async def ttl_enable(req: TTLEnableRequest):
+    global _online_learner
+    try:
+        from nfn.online_learner import OnlineLearner
+        engine = get_engine()
+        _online_learner = OnlineLearner(
+            engine.model,
+            engine.tokenizer,
+            adapter_rank = req.adapter_rank,
+            online_lr    = req.online_lr,
+            n_steps      = req.n_steps,
+            ppl_gate     = req.ppl_gate,
+        )
+        return JSONResponse({"enabled": True, **_online_learner.stats()})
+    except Exception as e:
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
+
+
+# ── /api/ttl/disable ─────────────────────────────────────────────────────────
+
+@app.post("/api/ttl/disable")
+async def ttl_disable():
+    global _online_learner
+    _online_learner = None
+    return JSONResponse({"enabled": False})
+
+
+# ── /api/ttl/reset ───────────────────────────────────────────────────────────
+
+@app.post("/api/ttl/reset")
+async def ttl_reset():
+    if _online_learner is None:
+        return JSONResponse({"error": "TTL not enabled"}, status_code=400)
+    try:
+        _online_learner.reset()
+        return JSONResponse({"reset": True, **_online_learner.stats()})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
