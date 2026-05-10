@@ -1,9 +1,24 @@
+# NFN — Neural Fractal Network v5.0
+# Installation complète : pip install -e .
+# Ou : pip install -r requirements.txt
+
+# ── Core ────────────────────────────────────────────────────────────────────
 torch>=2.0.0
 numpy>=1.24.0
+
+# ── Serveur web ──────────────────────────────────────────────────────────────
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 websockets>=12.0
-pyyaml>=6.0
-tqdm>=4.66.0
 aiofiles>=23.2.0
 httpx>=0.27.0
+
+# ── Utilitaires ──────────────────────────────────────────────────────────────
+pyyaml>=6.0
+tqdm>=4.66.0
+
+# ── Optionnel — décommenter selon le besoin ──────────────────────────────────
+# tiktoken>=0.6.0        # tokenizer BPE plus rapide (recommandé)
+# pywebview>=4.0         # fenêtre desktop native Windows/Mac/Linux
+# pytest>=7.0            # tests unitaires
+# pytest-asyncio>=0.21   # tests async
