@@ -35,11 +35,12 @@ from typing import Any, Dict, List, Optional
 import torch
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent.parent
+STATIC_DIR = ROOT / "interface" / "static"
 sys.path.insert(0, str(ROOT))
 
 from nfn.config import NFNConfig
@@ -54,7 +55,7 @@ from interface.agents import ChatAgent, ThinkAgent, ToolAgent, LearnAgent, CodeA
 # App & CORS
 # ─────────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="NFN AGI Interface", version="4.0.0")
+app = FastAPI(title="NFN AGI Interface", version="5.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,6 +64,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve CSS / JS from interface/static/
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Global model state
@@ -183,7 +188,8 @@ class LoadModelRequest(BaseModel):
 
 @app.on_event("startup")
 async def startup():
-    _init_default_model()
+    # Run blocking model init in a thread so the event loop stays responsive
+    await asyncio.to_thread(_init_default_model)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,21 +211,15 @@ async def status():
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     engine = get_engine()
-    agent = ChatAgent(
-        engine,
-        use_rag      = req.use_rag,
-        think_rounds = req.think_rounds,
-        use_tools    = req.use_tools,
-    )
+    agent = ChatAgent(engine, use_rag=req.use_rag,
+                      think_rounds=req.think_rounds, use_tools=req.use_tools)
     try:
-        result = agent.reply(
-            req.messages,
-            system      = req.system,
-            max_tokens  = req.max_tokens,
-            temperature = req.temperature,
-            top_k       = req.top_k,
-            top_p       = req.top_p,
-        )
+        import functools
+        result = await asyncio.to_thread(functools.partial(
+            agent.reply, req.messages,
+            system=req.system, max_tokens=req.max_tokens,
+            temperature=req.temperature, top_k=req.top_k, top_p=req.top_p,
+        ))
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
@@ -234,12 +234,12 @@ async def think(req: ThinkRequest):
     engine = get_engine()
     agent  = ThinkAgent(engine, default_rounds=req.n_rounds)
     try:
-        result = agent.think_and_answer(
-            req.question,
-            n_rounds          = req.n_rounds,
-            max_answer_tokens = req.max_answer_tokens,
-            temperature       = req.temperature,
-        )
+        import functools
+        result = await asyncio.to_thread(functools.partial(
+            agent.think_and_answer, req.question,
+            n_rounds=req.n_rounds, max_answer_tokens=req.max_answer_tokens,
+            temperature=req.temperature,
+        ))
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
@@ -254,12 +254,11 @@ async def agent_run(req: AgentRequest):
     engine = get_engine()
     agent  = ToolAgent(engine)
     try:
-        result = agent.run(
-            req.task,
-            system     = req.system,
-            max_new_tokens = req.max_tokens,
-            temperature = req.temperature,
-        )
+        import functools
+        result = await asyncio.to_thread(functools.partial(
+            agent.run, req.task,
+            system=req.system, max_new_tokens=req.max_tokens, temperature=req.temperature,
+        ))
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
@@ -273,16 +272,13 @@ async def agent_run(req: AgentRequest):
 async def generate(req: GenerateRequest):
     engine = get_engine()
     try:
-        text = engine.generate(
-            req.prompt,
-            max_new_tokens   = req.max_tokens,
-            temperature      = req.temperature,
-            top_k            = req.top_k,
-            top_p            = req.top_p,
-            greedy           = req.greedy,
-            think_rounds     = req.think_rounds,
-            use_speculative  = req.speculative,
-        )
+        import functools
+        text = await asyncio.to_thread(functools.partial(
+            engine.generate, req.prompt,
+            max_new_tokens=req.max_tokens, temperature=req.temperature,
+            top_k=req.top_k, top_p=req.top_p, greedy=req.greedy,
+            think_rounds=req.think_rounds, use_speculative=req.speculative,
+        ))
         return JSONResponse({"text": text, "prompt": req.prompt})
     except Exception as e:
         return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
@@ -504,11 +500,12 @@ async def ws_chat(ws: WebSocket):
                 think_rounds = data.get("think_rounds", 0),
                 use_tools    = data.get("use_tools", False),
             )
-            result = agent.reply(
-                history,
-                max_tokens  = data.get("max_tokens", 512),
-                temperature = data.get("temperature", 0.8),
-            )
+            import functools
+            result = await asyncio.to_thread(functools.partial(
+                agent.reply, history,
+                max_tokens=data.get("max_tokens", 512),
+                temperature=data.get("temperature", 0.8),
+            ))
             reply = result["reply"]
             history.append({"role": "assistant", "content": reply})
 
@@ -545,7 +542,8 @@ async def ws_train(ws: WebSocket):
     except WebSocketDisconnect:
         pass
     finally:
-        _ws_clients.discard(ws) if hasattr(_ws_clients, "discard") else None
+        if ws in _ws_clients:
+            _ws_clients.remove(ws)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -953,9 +951,12 @@ document.querySelectorAll('.tab-content').forEach((el,i) => { if(i>0) el.style.d
 """
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=FileResponse)
 async def root():
-    return HTMLResponse(_HTML)
+    idx = STATIC_DIR / "index.html"
+    if idx.exists():
+        return FileResponse(str(idx))
+    return HTMLResponse(_HTML)  # fallback to built-in UI
 
 
 # ─────────────────────────────────────────────────────────────────────────────

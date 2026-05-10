@@ -37,41 +37,41 @@ BANNER = r"""
   ╔══════════════════════════════════════════════════════════════╗
   ║   ⬡  Neural Fractal Network — AGI All-in-One App  ⬡         ║
   ║                                                              ║
-  ║   • Chat avec le modèle          /ws/chat                    ║
-  ║   • Entraînement en direct       /api/train/start            ║
-  ║   • Exploration web (auto-learn) /ws/explore                 ║
-  ║   • Adaptation test-time (TTL)   /api/ttl/enable             ║
+  ║   • Chat with the model          /ws/chat                    ║
+  ║   • Live training                /api/train/start            ║
+  ║   • Web exploration (auto-learn) /ws/explore                 ║
+  ║   • Test-time adaptation (TTL)   /api/ttl/enable             ║
   ╚══════════════════════════════════════════════════════════════╝
 """
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="NFN AGI — Interface web + apprentissage autonome",
+        description="NFN AGI — Web interface + autonomous learning",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     p.add_argument("--host",          type=str,   default="127.0.0.1",
-                   help="Adresse d'écoute (default: 127.0.0.1)")
+                   help="Bind address (default: 127.0.0.1)")
     p.add_argument("--port",          type=int,   default=8000,
-                   help="Port TCP (default: 8000)")
+                   help="TCP port (default: 8000)")
     p.add_argument("--model",         type=str,   default=None,
-                   help="Chemin vers un checkpoint .pt à précharger")
+                   help="Path to a .pt checkpoint to preload")
     p.add_argument("--config",        type=str,   default="nano",
                    choices=["nano", "small", "medium"],
-                   help="Taille du modèle (default: nano)")
+                   help="Model size preset (default: nano)")
     p.add_argument("--open",          dest="open_browser",
                    action="store_true",  default=True,
-                   help="Ouvrir le navigateur automatiquement (default)")
+                   help="Open browser automatically (default)")
     p.add_argument("--no-open",       dest="open_browser",
                    action="store_false",
-                   help="Ne pas ouvrir le navigateur")
+                   help="Do not open the browser")
     p.add_argument("--ttl",           action="store_true", default=False,
-                   help="Activer l'adaptation test-time au démarrage")
+                   help="Enable test-time adaptation (TTL) at startup")
     p.add_argument("--adapter-rank",  type=int,   default=8,
-                   help="Rang LoRA pour TTL (default: 8)")
+                   help="LoRA adapter rank for TTL (default: 8)")
     p.add_argument("--reload",        action="store_true", default=False,
-                   help="Mode dev avec rechargement automatique")
+                   help="Dev mode with auto-reload")
     return p.parse_args()
 
 
@@ -108,13 +108,13 @@ def main() -> None:
     url = f"http://{args.host}:{args.port}"
 
     print(BANNER)
-    print(f"  Adresse    : {url}")
+    print(f"  URL        : {url}")
     print(f"  Config     : {args.config}")
-    print(f"  Modèle     : {args.model or 'initialisation automatique'}")
-    print(f"  TTL        : {'activé (rank=' + str(args.adapter_rank) + ')' if args.ttl else 'désactivé'}")
-    print(f"  Dev reload : {'oui' if args.reload else 'non'}")
+    print(f"  Model      : {args.model or 'auto (nano)'}")
+    print(f"  TTL        : {'enabled (rank=' + str(args.adapter_rank) + ')' if args.ttl else 'disabled'}")
+    print(f"  Dev reload : {'yes' if args.reload else 'no'}")
     print()
-    print("  Appuyez sur Ctrl+C pour arrêter.")
+    print("  Press Ctrl+C to stop.")
     print()
 
     # Write runtime config so interface/app.py can pick it up
@@ -131,8 +131,8 @@ def main() -> None:
     try:
         import uvicorn
     except ImportError:
-        print("  [ERREUR] uvicorn non installé.")
-        print("  Installe les dépendances avec : pip install -r requirements.txt")
+        print("  [ERROR] uvicorn not installed.")
+        print("  Install dependencies with: pip install -r requirements.txt")
         sys.exit(1)
 
     # Decide how to open the UI
@@ -152,7 +152,7 @@ def main() -> None:
             log_level="info",
         )
     except KeyboardInterrupt:
-        print("\n  Arrêt demandé. À bientôt !")
+        print("\n  Shutting down. Goodbye!")
     finally:
         if runtime_path.exists():
             try:
