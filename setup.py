@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="nfn",
     version="5.0.0",
-    description="Neural Fractal Network — Architecture LM à géométrie fractale et dynamique de phase",
+    description="Neural Fractal Network — Language model architecture with fractal geometry and phase dynamics",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     author="Philippe-Antoine Robert",

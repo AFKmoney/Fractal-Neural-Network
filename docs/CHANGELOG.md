@@ -1,97 +1,97 @@
 # CHANGELOG — Neural Fractal Network (NFN)
 
-> **Auteur :** Philippe-Antoine Robert  
-> **Licence :** Propriétaire — Philippe-Antoine Robert, tous droits réservés
+> **Author:** Philippe-Antoine Robert  
+> **License:** Proprietary — Philippe-Antoine Robert, all rights reserved
 
 ---
 
-## [5.0.0] — 2026-05-10 — App tout-en-un, apprentissage autonome, adaptation TTL
+## [5.0.0] — 2026-05-10 — All-in-one app, autonomous learning, TTL adaptation
 
-### Nouveaux fichiers
+### New files
 
-#### `nfn/online_learner.py` — Adaptation test-time (TTL)
-- `LoRALinear` : wrapper sur `nn.Linear` avec matrices A/B rang-r (init B=0 → adaptateu muet au démarrage)
-- `OnlineLearner` : injecte les adaptateurs dans toutes les projections attention/MLP du modèle
-- **Poids de base gelés** — seuls les adaptateurs (~0.1% des params) se mettent à jour
-- `adapt(ids)` : N steps de gradient sur les adaptateurs pour un nouveau contexte
-- `adapt_from_text(text)` : tokenise puis adapte
-- Confidence gate `ppl_gate` : skip si le modèle connaît déjà (ppl < seuil)
-- `decay(steps)` : décroissance exponentielle des adaptateurs (oubli contrôlé)
-- `save_adapters / load_adapters` : persistance entre sessions
-- Proxy `.weight / .bias` pour compatibilité avec `nn.MultiheadAttention`
+#### `nfn/online_learner.py` — Test-time learning (TTL)
+- `LoRALinear`: wraps `nn.Linear` with rank-r A/B matrices (B init=0 → adapter starts silent)
+- `OnlineLearner`: injects adapters into all attention/MLP projections in the model
+- **Base weights stay frozen** — only adapters (~0.1% of params) update
+- `adapt(ids)`: N gradient steps on adapters for a new context sequence
+- `adapt_from_text(text)`: tokenise then adapt
+- Confidence gate `ppl_gate`: skip update if model already knows the content (ppl < threshold)
+- `decay(steps)`: exponential decay of adapters (controlled forgetting)
+- `save_adapters / load_adapters`: persistence across sessions
+- Proxy `.weight / .bias / .in_features / .out_features` for `nn.MultiheadAttention` compatibility
 
-#### `nfn/web_explorer.py` — Navigation internet (stdlib only)
-- `WebExplorer.fetch(url)` : fetch + extraction texte propre via `html.parser`
-  - Supprime `<script>`, `<style>`, `<nav>`, `<footer>`, `<aside>`, `<header>`
-  - Retourne `{url, title, text, n_chars, error?}`
-- `extract_links(html, base_url)` : extraction + normalisation des liens absolus
-- `score_link(url, text, keywords)` : score par overlap de mots-clés pour navigation guidée
-- `explore(seed_url, n_pages, keywords)` : générateur de navigation autonome
-- Aucune dépendance externe — `urllib.request` + `html.parser` uniquement
+#### `nfn/web_explorer.py` — Internet navigation (stdlib only)
+- `WebExplorer.fetch(url)`: fetch + clean text extraction via `html.parser`
+  - Strips `<script>`, `<style>`, `<nav>`, `<footer>`, `<aside>`, `<header>`
+  - Returns `{url, title, text, n_chars, error?}`
+- `extract_links(html, base_url)`: extract and normalise absolute links
+- `score_link(url, text, keywords)`: keyword overlap score for guided navigation
+- `explore(seed_url, n_pages, keywords)`: autonomous navigation generator
+- Zero extra dependencies — `urllib.request` + `html.parser` only
 
-#### `train_agi.py` — Point d'entrée entraînement AGI
-- 5 signaux d'entraînement simultanés avec curriculum
-- Flags `--ttl`, `--adapter-rank`, `--online-lr`, `--online-steps`, `--ppl-gate`
-- `--eval-every` pour perplexité validation périodique
-- `--save-adapters / --load-adapters` pour continuité des sessions
+#### `train_agi.py` — AGI training entry point
+- 5 simultaneous training signals with curriculum
+- `--ttl`, `--adapter-rank`, `--online-lr`, `--online-steps`, `--ppl-gate` flags
+- `--eval-every` for periodic held-out perplexity
+- `--save-adapters / --load-adapters` for session continuity
 
-#### `start.bat` / `start.sh` — Lanceurs Windows / Linux-Mac
-- Double-clic Windows → vérifie Python, démarre le serveur, ouvre le navigateur
-- Messages d'erreur guidés si Python manquant
+#### `start.bat` / `start.sh` — Windows / Linux-Mac launchers
+- Windows double-click → checks Python, starts server, opens browser
+- Guided error messages if Python is missing
 
-### Améliorations
+### Improvements
 
-#### `training/agi_trainer.py` — AGITrainer v5.0 (réécriture complète)
-- `AGITextDataset` : tokenisation + fenêtre glissante
-- `SelfPlayBuffer` : deque (prompt, gagnant, perdant, delta_score)
-- `CuriosityWeighter` : pondération par entropie par token via softmax
-- `_forward_step()` : forward WAKE avec curiosité
-- `_self_play_step()` : génère N candidats, DPO-lite + distillation
-- `_critique_step()` : génère → critique → révision → entraîne sur révision ×2
-- `_sleep_cycle()` : `maybe_consolidate()` + replay buffer
-- Curriculum : LM seulement → montée progressive → pertes AGI complètes
+#### `training/agi_trainer.py` — AGITrainer v5.0 (full rewrite)
+- `AGITextDataset`: tokenisation + sliding window
+- `SelfPlayBuffer`: deque of (prompt, winner, loser, score_delta)
+- `CuriosityWeighter`: per-token entropy weighting via softmax
+- `_forward_step()`: WAKE forward with curiosity weighting
+- `_self_play_step()`: generate N candidates, DPO-lite + distillation toward winner
+- `_critique_step()`: generate → critique → revision → train on revision at 2× weight
+- `_sleep_cycle()`: `maybe_consolidate()` + replay buffer
+- Curriculum: LM only → progressive ramp → full AGI losses
 
-#### `interface/app.py` — Nouvelles routes
-- `POST /api/explore/url` : fetch URL + adaptation OnlineLearner, retourne ppl avant/après
-- `POST /api/explore/text` : adaptation depuis texte brut
-- `WS /ws/explore` : stream d'exploration autonome (asyncio.to_thread pour les appels bloquants)
-- `GET /api/ttl/stats` : statistiques des adaptateurs
-- `POST /api/ttl/enable` : créer OnlineLearner sur le modèle courant
-- `POST /api/ttl/disable` : supprimer les adaptateurs
-- `POST /api/ttl/reset` : remettre tous les adaptateurs à zéro
+#### `interface/app.py` — New routes
+- `POST /api/explore/url`: fetch URL + OnlineLearner adaptation, returns ppl before/after
+- `POST /api/explore/text`: adapt from raw text
+- `WS /ws/explore`: autonomous exploration stream (asyncio.to_thread for blocking fetch)
+- `GET /api/ttl/stats`: adapter statistics
+- `POST /api/ttl/enable`: create OnlineLearner on the live model
+- `POST /api/ttl/disable`: remove adapters
+- `POST /api/ttl/reset`: zero all adapter weights
 
-#### `interface/static/index.html + app.js` — 2 nouveaux onglets
-- **Explorer le Web** : URL fetch, exploration autonome, adaptation depuis texte
-- **Adaptation TTL** : toggle activation, contrôles rank/lr/steps, stats live, reset
+#### `interface/static/index.html + app.js` — 2 new tabs
+- **Explore the Web**: URL fetch, autonomous exploration, adapt from text
+- **TTL Adaptation**: enable/disable toggle, rank/lr/steps controls, live stats, reset
 
-#### `run.py` — Lanceur amélioré
-- Flags `--ttl`, `--adapter-rank`
-- Tente `pywebview` pour fenêtre native ; se rabat sur le navigateur si absent
-- Bannière de démarrage avec features actives
+#### `run.py` — Improved launcher
+- `--ttl`, `--adapter-rank` flags
+- Tries `pywebview` for native window; falls back to browser if not installed
+- Startup banner with active features
 
-### Corrections
-- `tests/test_agi.py` : `consolidate_every` → `sleep_every` (renommé dans AGITrainer)
-- `LoRALinear` : proxy `.weight`, `.bias`, `.in_features`, `.out_features` pour compatibilité `nn.MultiheadAttention`
+### Bug fixes
+- `tests/test_agi.py`: `consolidate_every` → `sleep_every` (renamed in AGITrainer)
+- `LoRALinear`: proxy `.weight`, `.bias`, `.in_features`, `.out_features` for `nn.MultiheadAttention` compatibility
 
 ---
 
-## [4.0.0] — 2026-05-03 — Stack AGI complet
+## [4.0.0] — 2026-05-03 — Full AGI stack
 
-### Nouveaux modules
-- `nfn/episodic_memory.py` — `TwoTierMemory` : anneau épisodique + condensat sémantique SVD
-- `nfn/causal.py` — `CausalGraphLayer` : DAG + interventions do-calculus
-- `nfn/goal.py` — `PhaseGoalPredictor` : forçage Kuramoto λ·sin(θ*−θ)
-- `nfn/reasoning.py` — `RecursiveReasoner` : ACT halting différentiable
-- `nfn/predictive.py` — `PredictiveCodingBlock` : erreur de prédiction hiérarchique
-- `nfn/hyper.py` — `ContextHyperNet` : génération de poids par contexte
-- `nfn/ssm.py` — `FractalSSM` : SSM style Mamba avec fréquences Mandelbrot
-- `nfn/agi_block.py` — `AGIBlock` : bloc unifié v4.0
-- `nfn/agi_model.py` — `AGINFNModel` : stack complet + décodage spéculatif
-- `training/losses.py` — `AGILoss` : agrégateur multi-objectif
-- `training/agi_trainer.py` — `AGITrainer` : entraîneur initial (remplacé en v5.0)
-- `inference/engine.py` — `AGIInferenceEngine` : streaming, beam, spéculatif
-- `interface/app.py` — Interface FastAPI complète
-- `interface/agents.py` — Agents Chat/Code/Raisonnement avec outils
+### New modules
+- `nfn/episodic_memory.py` — `TwoTierMemory`: episodic ring + semantic SVD condensate
+- `nfn/causal.py` — `CausalGraphLayer`: DAG + do-calculus interventions
+- `nfn/goal.py` — `PhaseGoalPredictor`: Kuramoto forcing λ·sin(θ*−θ)
+- `nfn/reasoning.py` — `RecursiveReasoner`: differentiable ACT halting
+- `nfn/predictive.py` — `PredictiveCodingBlock`: hierarchical prediction error
+- `nfn/hyper.py` — `ContextHyperNet`: context-conditioned weight generation
+- `nfn/ssm.py` — `FractalSSM`: Mamba-style SSM with Mandelbrot frequencies
+- `nfn/agi_block.py` — `AGIBlock`: unified v4.0 block
+- `nfn/agi_model.py` — `AGINFNModel`: full stack + speculative decode
+- `training/losses.py` — `AGILoss`: multi-objective aggregator
+- `training/agi_trainer.py` — initial `AGITrainer` (replaced in v5.0)
+- `inference/engine.py` — `AGIInferenceEngine`: streaming, beam, speculative
+- `interface/app.py` — full FastAPI interface
+- `interface/agents.py` — Chat/Code/Reasoning agents with tools
 
 ---
 
