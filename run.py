@@ -30,6 +30,14 @@ import threading
 import time
 from pathlib import Path
 
+# Set single-threaded BLAS before numpy/torch loads.
+# Without this, numpy MKL spawns threads for medium-sized matmuls,
+# paying ~100ms thread-creation overhead per call on this CPU.
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 

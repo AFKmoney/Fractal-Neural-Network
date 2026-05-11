@@ -119,17 +119,15 @@ class PhaseRoutedMoE(nn.Module):
         self.K = top_k
         self.kappa = kappa
         self.n_phases = n_phases
+        self.d_ff = d_ff_per_expert
 
-        # ── Experts: E independent FFNs ───────────────────────────────────
-        self.experts = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(d_model, d_ff_per_expert, bias=False),
-                nn.GELU(),
-                nn.Linear(d_ff_per_expert, d_model, bias=False),
-                nn.Dropout(dropout),
-            )
-            for _ in range(n_experts)
-        ])
+        # ── Experts: stacked weight matrices for vectorized batched matmul ─
+        # W1[e]: maps d_model → d_ff  (up-projection for expert e)
+        # W2[e]: maps d_ff → d_model  (down-projection for expert e)
+        self.W1 = nn.Parameter(torch.empty(n_experts, d_ff_per_expert, d_model))
+        self.W2 = nn.Parameter(torch.empty(n_experts, d_model, d_ff_per_expert))
+        nn.init.kaiming_uniform_(self.W1, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.W2, a=math.sqrt(5))
 
         # ── Phase encoder ─────────────────────────────────────────────────
         self.phase_enc = PhaseEncoder(d_model, n_phases)
@@ -164,46 +162,33 @@ class PhaseRoutedMoE(nn.Module):
         """
         x: [B, L, d]  →  [B, L, d]
 
-        Sparse top-k dispatch: only top_k experts compute for each token.
+        Vectorized: all experts computed in a single batched matmul — no Python loop.
         """
         B, L, d = x.shape
+        N = B * L
+
         weights = self.routing_weights(x)          # [B, L, E]
 
-        # Top-k selection (sparse activation)
+        # Sparse top-k weights (zero out non-selected experts)
         topk_vals, topk_idx = torch.topk(weights, self.K, dim=-1)  # [B, L, K]
-        topk_vals = topk_vals / topk_vals.sum(dim=-1, keepdim=True) # renorm
+        topk_vals = topk_vals / topk_vals.sum(-1, keepdim=True).clamp(min=1e-6)
+        g = torch.zeros_like(weights).scatter_(-1, topk_idx, topk_vals).view(N, self.E)
 
-        # Compute expert outputs (only for activated experts)
-        # Flatten spatial dims to simplify indexing
-        x_flat = x.view(-1, d)
+        x_flat = x.view(N, d)
 
-        # Flatten topk indices and values
-        topk_idx_flat = topk_idx.view(-1, self.K)
-        topk_vals_flat = topk_vals.view(-1, self.K)
+        # Up-projection: single large matmul [N, d] @ [d, E*d_ff] → [N, E*d_ff]
+        # then reshape to [E, N, d_ff] — no Python loop over experts
+        h = (x_flat @ self.W1.view(self.E * self.d_ff, d).t()
+             ).view(N, self.E, self.d_ff).permute(1, 0, 2)   # [E, N, d_ff]
+        h = F.gelu(h)
 
-        out_flat = torch.zeros_like(x_flat)
+        # Down-projection: batched matmul [E, N, d_ff] @ [E, d_ff, d] → [E, N, d]
+        out_e = h @ self.W2.transpose(1, 2)                  # [E, N, d]
 
-        for e_id in range(self.E):
-            # Find tokens assigned to this expert in any slot
-            mask_flat = (topk_idx_flat == e_id) # [B*L, K]
+        # Sparse weighted sum: [N, 1, E] @ [N, E, d] → [N, d]
+        out = (g.unsqueeze(1) @ out_e.permute(1, 0, 2)).squeeze(1)
 
-            # Since K-slots are distinct for a given token (topk without replacement),
-            # any token will have at most one True in its mask_flat row.
-            token_mask = mask_flat.any(dim=-1) # [B*L]
-
-            if not token_mask.any():
-                continue
-
-            x_e = x_flat[token_mask] # [n_active, d]
-            y_e = self.experts[e_id](x_e) # [n_active, d]
-
-            # Extract gates. Since there is at most one True per row, we can just mask
-            gates_e = topk_vals_flat[mask_flat] # [n_active]
-
-            out_flat[token_mask] += gates_e.unsqueeze(-1) * y_e
-
-        out = out_flat.view(B, L, d)
-        return self.norm(x + out)
+        return self.norm(x + out.view(B, L, d))
 
     def load_balance_loss(self, x: torch.Tensor) -> torch.Tensor:
         """

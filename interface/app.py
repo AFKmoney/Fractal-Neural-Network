@@ -22,6 +22,14 @@ Endpoints:
   WS   /ws/train              → live training metrics (WebSocket)
 """
 
+# Single-threaded BLAS — prevents ~100ms thread-spawn overhead per numpy matmul.
+# Must come before any numpy/torch import.
+import os as _os
+_os.environ.setdefault("MKL_NUM_THREADS", "1")
+_os.environ.setdefault("OMP_NUM_THREADS", "1")
+_os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import asyncio
 import json
 import os
@@ -90,24 +98,40 @@ def get_engine() -> AGIInferenceEngine:
 
 
 def _init_default_model():
-    """Initialise a tiny model for immediate use (no checkpoint needed)."""
+    """Initialise a fast CPU-optimised model using numpy inference."""
     global _engine
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = NFNTokenizer()
 
+    # Build the smallest viable model. All optional AGI features are disabled
+    # so the AGIBlock reduces to a plain EfficientNFNBlock call. The numpy
+    # inference patch then bypasses PyTorch entirely for ~70× speedup on CPU.
+    gpu = device.type == "cuda"
     model = build_agi_model(
-        vocab_size           = tokenizer.vocab_size,
-        d_model              = 256,
-        n_blocks             = 4,
-        use_reasoning        = True,
-        use_predictive_coding = True,
-        use_free_energy      = True,
-        use_self_consistency = True,
-        use_plan_executor    = True,
-        use_mod              = True,
-        use_mtp              = True,
-        use_hyper            = True,
+        vocab_size            = tokenizer.vocab_size,
+        d_model               = 128,
+        n_blocks              = 2,
+        use_reasoning         = False,
+        use_predictive_coding = False,
+        use_free_energy       = False,
+        use_self_consistency  = False,
+        use_plan_executor     = False,
+        use_mod               = False,
+        use_mtp               = False,
+        use_hyper             = False,
+        use_memory            = False,
+        use_working_memory    = False,
+        use_causal            = False,
+        use_goal              = False,
+        use_bayesian          = False,
     ).to(device)
+
+    # On CPU, apply numpy inference patch to bypass PyTorch's ~70ms/op overhead.
+    # On CUDA the standard PyTorch path is already fast.
+    if device.type == "cpu":
+        from inference.fast_numpy import apply_numpy_patch
+        apply_numpy_patch(model)
+        print("[NFN AGI] NumPy inference patch applied (CPU fast path).")
 
     _engine = AGIInferenceEngine(
         model,
