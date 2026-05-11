@@ -77,8 +77,18 @@ class KnowledgeStore:
             return []
         if self._emb_cache is None:
             embs = [e["embedding"] for e in self.entries]
-            self._emb_cache = torch.tensor(embs, dtype=torch.float32)
+            try:
+                self._emb_cache = torch.tensor(embs, dtype=torch.float32)
+            except (ValueError, RuntimeError):
+                # Stale entries from a different model dimension — discard
+                self.entries.clear()
+                return []
         cache = self._emb_cache.to(query_emb.device)
+        if cache.shape[-1] != query_emb.shape[-1]:
+            # Dimension mismatch (model rebuilt with different d_model)
+            self.entries.clear()
+            self._emb_cache = None
+            return []
         q = F.normalize(query_emb.float(), dim=-1).unsqueeze(0)   # [1, d]
         e = F.normalize(cache, dim=-1)                             # [N, d]
         scores = (q @ e.T).squeeze(0)                              # [N]

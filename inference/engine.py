@@ -187,11 +187,17 @@ class AGIInferenceEngine:
         stop_ids = stop_tokens or [self.cfg.eos_token_id]
         ids = input_ids
         mu  = self._mirostat_mu
+        n_generated = 0
 
         for _ in range(max_new_tokens):
             ctx = ids[:, -max_ctx:]
             logits, _ = self.model(ctx, write_memory=write_memory)
             next_logits = logits[:, -1, :]   # [1, V]
+
+            # Suppress EOS for the first 5 tokens so we always get some output
+            if n_generated < 5:
+                for sid in stop_ids:
+                    next_logits[:, sid] = float("-inf")
 
             if mirostat:
                 tok, mu = mirostat_v2(next_logits, mirostat_tau, mirostat_eta, mu)
@@ -200,6 +206,7 @@ class AGIInferenceEngine:
 
             self._mirostat_mu = mu
             ids = torch.cat([ids, torch.tensor([[tok]], device=self.device)], dim=1)
+            n_generated += 1
 
             if tok in stop_ids:
                 break
