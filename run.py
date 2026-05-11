@@ -153,6 +153,14 @@ def main() -> None:
         )
     except KeyboardInterrupt:
         print("\n  Shutting down. Goodbye!")
+    except OSError as e:
+        if "10048" in str(e) or "address already in use" in str(e).lower():
+            print(f"\n  [ERROR] Port {args.port} is already in use.")
+            print(f"  Another instance may still be running.")
+            print(f"  Fix:  python run.py --port {args.port + 1}")
+            print(f"  Or close the other instance first, then retry.")
+            sys.exit(1)
+        raise
     finally:
         if runtime_path.exists():
             try:
