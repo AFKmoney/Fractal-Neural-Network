@@ -149,10 +149,19 @@ class ThinkRequest(BaseModel):
     temperature:   float = 0.7
 
 class AgentRequest(BaseModel):
-    task:          str
+    task:          Optional[str] = None
+    goal:          Optional[str] = None   # JS alias for task
     system:        Optional[str] = None
     max_tokens:    int   = 1024
+    max_steps:     int   = 5
     temperature:   float = 0.7
+
+class CodeRequest(BaseModel):
+    code:        str   = ""
+    instruction: str   = ""
+    language:    str   = "python"
+    max_tokens:  int   = 512
+    temperature: float = 0.4
 
 class LearnRequest(BaseModel):
     text:   str
@@ -178,7 +187,8 @@ class TrainRequest(BaseModel):
     agi_loss_ramp:    int   = 50
 
 class LoadModelRequest(BaseModel):
-    checkpoint_path: str
+    checkpoint_path: Optional[str] = None
+    path:            Optional[str] = None   # JS alias
     device:          str = "cpu"
 
 
@@ -253,13 +263,45 @@ async def think(req: ThinkRequest):
 async def agent_run(req: AgentRequest):
     engine = get_engine()
     agent  = ToolAgent(engine)
+    task   = req.task or req.goal or ""
     try:
         import functools
         result = await asyncio.to_thread(functools.partial(
-            agent.run, req.task,
+            agent.run, task,
             system=req.system, max_new_tokens=req.max_tokens, temperature=req.temperature,
         ))
+        # Normalise to what the JS expects: {steps, final_answer}
+        if "result" in result and "steps" not in result:
+            result["steps"] = [{"step": 1, "thought": result["result"], "final": True}]
+            result["final_answer"] = result["result"]
         return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
+
+
+@app.post("/api/code")
+async def code_endpoint(req: CodeRequest):
+    engine = get_engine()
+    agent  = CodeAgent(engine)
+    try:
+        import functools
+        # Dispatch based on what was provided
+        if req.instruction and not req.code:
+            fn = functools.partial(agent.generate, req.instruction,
+                                   language=req.language, max_tokens=req.max_tokens)
+            result = await asyncio.to_thread(fn)
+            return JSONResponse({"result": result})
+        elif req.instruction:
+            fn = functools.partial(agent.generate,
+                                   f"{req.instruction}\n\n```{req.language}\n{req.code}\n```",
+                                   language=req.language, max_tokens=req.max_tokens)
+            result = await asyncio.to_thread(fn)
+            return JSONResponse({"result": result})
+        else:
+            fn = functools.partial(agent.complete, req.code,
+                                   language=req.language, max_tokens=req.max_tokens)
+            result = await asyncio.to_thread(fn)
+            return JSONResponse({"result": result})
     except Exception as e:
         return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
 
@@ -357,12 +399,24 @@ async def memory_save():
 # Load model from checkpoint
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.post("/api/save_model")
+async def save_model_endpoint():
+    engine = get_engine()
+    path   = str(ROOT / "checkpoints" / "knowledge_store.json.gz")
+    try:
+        engine.learner.save_store(path)
+        return JSONResponse({"path": path, "entries": len(engine.learner.store)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.post("/api/load_model")
 async def load_model(req: LoadModelRequest):
     global _engine
     device = torch.device(req.device)
+    ckpt_path = req.checkpoint_path or req.path or ""
     try:
-        ckpt = torch.load(req.checkpoint_path, map_location=device, weights_only=False)
+        ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         cfg  = NFNConfig.from_dict(ckpt["cfg"])
         model = build_agi_model(
             vocab_size = cfg.vocab_size,
@@ -375,7 +429,7 @@ async def load_model(req: LoadModelRequest):
         model.load_state_dict(ckpt["model_state"])
         tokenizer = NFNTokenizer()
         _engine = AGIInferenceEngine(model, tokenizer, knowledge_store_path=KNOWLEDGE_STORE_PATH)
-        return JSONResponse({"loaded": req.checkpoint_path, **_engine.status()})
+        return JSONResponse({"loaded": ckpt_path, **_engine.status()})
     except Exception as e:
         return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
 
@@ -440,24 +494,46 @@ async def ws_stream(ws: WebSocket):
     try:
         data = await ws.receive_json()
         engine = get_engine()
-        prompt = data.get("prompt", "")
-        kwargs = {
-            "max_new_tokens": data.get("max_tokens", 256),
-            "temperature":    data.get("temperature", 0.8),
-            "top_k":          data.get("top_k", 50),
-            "top_p":          data.get("top_p", 0.95),
-            "think_rounds":   data.get("think_rounds", 0),
-        }
-        n_tokens = 0
-        async for token in engine.astream(prompt, **kwargs):
-            await ws.send_json({"token": token, "n": n_tokens})
-            n_tokens += 1
-        await ws.send_json({"done": True, "n_tokens": n_tokens})
+        mode = data.get("mode", "generate")
+
+        if mode == "chat":
+            import functools
+            messages = data.get("messages", [])
+            agent = ChatAgent(engine, use_rag=data.get("use_rag", True),
+                              think_rounds=data.get("think_rounds", 0))
+            result = await asyncio.to_thread(functools.partial(
+                agent.reply, messages,
+                max_tokens=data.get("max_tokens", 512),
+                temperature=data.get("temperature", 0.8),
+                top_k=data.get("top_k", 50),
+                top_p=data.get("top_p", 0.95),
+            ))
+            reply = result.get("reply", "")
+            # Stream token by token
+            words = reply.split(" ")
+            for i, w in enumerate(words):
+                text = ("" if i == 0 else " ") + w
+                await ws.send_json({"type": "token", "text": text})
+            await ws.send_json({"type": "end", "n_tokens": len(words)})
+        else:
+            prompt = data.get("prompt", "")
+            kwargs = {
+                "max_new_tokens": data.get("max_tokens", 256),
+                "temperature":    data.get("temperature", 0.8),
+                "top_k":          data.get("top_k", 50),
+                "top_p":          data.get("top_p", 0.95),
+                "think_rounds":   data.get("think_rounds", 0),
+            }
+            n_tokens = 0
+            async for token in engine.astream(prompt, **kwargs):
+                await ws.send_json({"type": "token", "text": token})
+                n_tokens += 1
+            await ws.send_json({"type": "end", "n_tokens": n_tokens})
     except WebSocketDisconnect:
         pass
     except Exception as e:
         try:
-            await ws.send_json({"error": str(e)})
+            await ws.send_json({"type": "error", "text": str(e)})
         except Exception:
             pass
 
@@ -535,8 +611,8 @@ async def ws_train(ws: WebSocket):
     try:
         while True:
             if len(_train_metrics) > last_sent:
-                metrics = _train_metrics[last_sent:]
-                await ws.send_json({"metrics": metrics})
+                for m in _train_metrics[last_sent:]:
+                    await ws.send_json({"type": "metrics", "data": m})
                 last_sent = len(_train_metrics)
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:

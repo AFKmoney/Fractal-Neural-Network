@@ -72,11 +72,11 @@ async function refreshStatus() {
       txt.textContent = `${data.model.params} · ${data.model.device}`;
     } else {
       dot.className = 'error';
-      txt.textContent = 'Modèle non chargé';
+      txt.textContent = 'Model not loaded';
     }
   } catch {
     $('status-dot').className = 'error';
-    $('status-text').textContent = 'Serveur injoignable';
+    $('status-text').textContent = 'Server unreachable';
   }
 }
 
@@ -106,7 +106,7 @@ function initChat() {
     const div = document.createElement('div');
     div.className = `chat-msg ${role}`;
     div.innerHTML = `
-      <div class="msg-role">${role === 'user' ? 'Vous' : 'NFN'}</div>
+      <div class="msg-role">${role === 'user' ? 'You' : 'NFN'}</div>
       <div class="msg-bubble${streaming ? ' streaming' : ''}">${escapeHtml(content)}</div>
     `;
     msgs.appendChild(div);
@@ -154,7 +154,7 @@ function initChat() {
       }
     };
     ws.onerror = () => {
-      bubble.textContent = '⚠ Erreur de connexion';
+      bubble.textContent = '⚠ Connection error';
       bubble.classList.remove('streaming');
       state.isStreaming = false;
       send.disabled = false;
@@ -179,7 +179,7 @@ function initCode() {
     const output = $('code-output');
     const params = getParams();
 
-    output.textContent = '⏳ NFN génère…';
+    output.textContent = '⏳ NFN generating…';
     try {
       const res = await api('/api/code', 'POST', {
         code,
@@ -190,7 +190,7 @@ function initCode() {
       });
       output.textContent = res.result || res.explanation || res.refactored || JSON.stringify(res);
     } catch (e) {
-      output.textContent = '⚠ Erreur: ' + e.message;
+      output.textContent = '⚠ Error: ' + e.message;
     }
   }
 
@@ -221,12 +221,12 @@ function initAgent() {
 
     trace.innerHTML = '';
     runBtn.disabled = true;
-    runBtn.textContent = '⏳ Raisonnement…';
+    runBtn.textContent = '⏳ Reasoning…';
 
     // Show thinking indicator
     const thinkDiv = document.createElement('div');
     thinkDiv.className = 'agent-step';
-    thinkDiv.innerHTML = `<div class="agent-step-num">Objectif</div>
+    thinkDiv.innerHTML = `<div class="agent-step-num">Goal</div>
       <div class="agent-thought">${escapeHtml(goal)}</div>`;
     trace.appendChild(thinkDiv);
 
@@ -236,7 +236,7 @@ function initAgent() {
       for (const step of res.steps) {
         const div = document.createElement('div');
         div.className = `agent-step${step.final ? ' agent-final' : ''}`;
-        let html = `<div class="agent-step-num">Étape ${step.step}</div>
+        let html = `<div class="agent-step-num">Step ${step.step}</div>
           <div class="agent-thought">${escapeHtml(step.thought || '')}</div>`;
         if (step.action) {
           html += `<div class="agent-action">${escapeHtml(step.action)}</div>`;
@@ -251,7 +251,7 @@ function initAgent() {
       if (res.final_answer) {
         const finalDiv = document.createElement('div');
         finalDiv.className = 'agent-step agent-final';
-        finalDiv.innerHTML = `<div class="agent-step-num">✅ Réponse finale</div>
+        finalDiv.innerHTML = `<div class="agent-step-num">✅ Final answer</div>
           <div class="agent-thought" style="color:var(--green)">${escapeHtml(res.final_answer)}</div>`;
         trace.appendChild(finalDiv);
       }
@@ -260,22 +260,22 @@ function initAgent() {
     }
 
     runBtn.disabled = false;
-    runBtn.textContent = 'Exécuter';
+    runBtn.textContent = 'Run';
     trace.scrollTop = trace.scrollHeight;
   }
 }
 
 // ─── Training tab ─────────────────────────────────────────────────────────────
-const SAMPLE_TEXT = `Le Neural Fractal Network (NFN) est une architecture révolutionnaire.
-Il combine la géométrie fractale, les oscillations sinusoïdales paramétriques et l'apprentissage profond.
-Chaque nœud possède une phase θ et une fréquence naturelle Ω.
-Les connexions sont des fonctions sinusoïdales apprises : Γ(t) = A·sin(ω·t + φ).
-La topologie est auto-similaire : chaque sous-réseau est une copie contractée de l'ensemble.
-Le réseau superpose plusieurs motifs fractals : arbre binaire, Cantor, Sierpinski.
-L'entraînement utilise la rétropropagation à travers les phases (BPTP).
-La perte multi-objectif inclut L_tâche + λ_phase·L_phase + λ_freq·L_freq.
-Le NFN peut modéliser des dépendances à très longue portée sans explosion paramétrique.
-La synchronisation spontanée des oscillateurs implémente le liage temporel.
+const SAMPLE_TEXT = `The Neural Fractal Network (NFN) is a revolutionary architecture.
+It combines fractal geometry, parametric sinusoidal oscillations, and deep learning.
+Each node has a phase θ and a natural frequency Ω.
+Connections are learned sinusoidal functions: Γ(t) = A·sin(ω·t + φ).
+The topology is self-similar: each sub-network is a contracted copy of the whole.
+The network superimposes multiple fractal motifs: binary tree, Cantor, Sierpinski.
+Training uses back-propagation through phases (BPTP).
+The multi-objective loss includes L_task + λ_phase·L_phase + λ_freq·L_freq.
+NFN can model very long-range dependencies without parameter explosion.
+Spontaneous synchronisation of oscillators implements temporal binding.
 `;
 
 function initTraining() {
@@ -291,7 +291,7 @@ function initTraining() {
 
   startBtn.addEventListener('click', async () => {
     const text = $('train-text').value.trim();
-    if (!text) { addLog('⚠ Texte vide', 'bad'); return; }
+    if (!text) { addLog('⚠ Empty text', 'bad'); return; }
 
     const body = {
       text,
@@ -305,19 +305,19 @@ function initTraining() {
     const res = await api('/api/train/start', 'POST', body);
     if (res.error) { addLog('⚠ ' + res.error, 'bad'); return; }
 
-    addLog('▶ Entraînement démarré', 'good');
+    addLog('▶ Training started', 'good');
     startBtn.disabled = true;
     stopBtn.disabled = false;
     state.isTraining = true;
     badge.className = 'running';
-    badge.textContent = '● Entraînement';
+    badge.textContent = '● Training';
     state.lossHistory = [];
     connectTrainWS();
   });
 
   stopBtn.addEventListener('click', async () => {
     await api('/api/train/stop', 'POST');
-    addLog('⏹ Arrêt demandé…');
+    addLog('⏹ Stop requested…');
     stopBtn.disabled = true;
   });
 
@@ -356,8 +356,8 @@ function initTraining() {
       startBtn.disabled = false;
       stopBtn.disabled = true;
       badge.className = '';
-      badge.textContent = 'Terminé';
-      addLog('✅ Entraînement terminé', 'good');
+      badge.textContent = 'Done';
+      addLog('✅ Training complete', 'good');
     };
   }
 }
@@ -434,7 +434,7 @@ function drawLossChart() {
 function initInfo() {
   $('info-save').addEventListener('click', async () => {
     const res = await api('/api/save_model', 'POST');
-    alert(res.path ? `Sauvegardé: ${res.path}` : 'Erreur');
+    alert(res.path ? `Saved: ${res.path}` : 'Error saving');
   });
 
   $('info-reload').addEventListener('click', refreshInfo);
@@ -454,8 +454,8 @@ function initInfo() {
     const path = $('ckpt-path').value.trim();
     if (!path) return;
     const res = await api('/api/load_model', 'POST', { path });
-    if (res.error) alert('Erreur: ' + res.error);
-    else { alert(`Modèle chargé: ${res.params}`); refreshStatus(); refreshInfo(); }
+    if (res.error) alert('Error: ' + res.error);
+    else { alert(`Model loaded: ${res.params}`); refreshStatus(); refreshInfo(); }
   });
 
   drawFractal('binary_tree');
@@ -467,14 +467,14 @@ function refreshInfo() {
   const grid = $('model-params-grid');
   const info = state.modelInfo;
   const fields = [
-    ['Paramètres', info.params],
-    ['Vocabulaire', info.vocab_size],
+    ['Parameters', info.params],
+    ['Vocabulary', info.vocab_size],
     ['Dimension', info.d_model],
-    ['Niveaux (K)', info.n_levels],
-    ['Blocs NFN', info.n_blocks],
+    ['Levels (K)', info.n_levels],
+    ['NFN Blocks', info.n_blocks],
     ['Motifs', info.motifs?.join(', ')],
-    ['Contexte max', info.max_seq_len],
-    ['Dispositif', info.device],
+    ['Max context', info.max_seq_len],
+    ['Device', info.device],
   ];
   grid.innerHTML = fields.map(([k, v]) =>
     `<div class="info-param"><div class="info-param-key">${k}</div><div class="info-param-val">${v ?? '—'}</div></div>`
@@ -769,7 +769,7 @@ async function fetchUrl(url, adapt = true) {
   const card = document.createElement('div');
   card.className = 'explore-card';
   card.innerHTML = `<div class="explore-card-url">${escapeHtml(url)}</div>
-    <div class="explore-card-meta" style="color:var(--yellow)">Chargement…</div>`;
+    <div class="explore-card-meta" style="color:var(--yellow)">Loading…</div>`;
   feed.prepend(card);
 
   try {
@@ -777,7 +777,7 @@ async function fetchUrl(url, adapt = true) {
     renderExploreCard(card, res);
   } catch (e) {
     card.innerHTML = `<div class="explore-card-url">${escapeHtml(url)}</div>
-      <div class="explore-card-meta" style="color:var(--red)">Erreur: ${escapeHtml(e.message)}</div>`;
+      <div class="explore-card-meta" style="color:var(--red)">Error: ${escapeHtml(e.message)}</div>`;
     card.classList.add('error-card');
   }
 }
@@ -790,7 +790,7 @@ function renderExploreCard(card, data) {
     card.classList.add('error-card');
     card.innerHTML = `
       <div class="explore-card-url">${escapeHtml(data.url || '')}</div>
-      <div class="explore-card-meta" style="color:var(--red)">Erreur: ${escapeHtml(data.error)}</div>`;
+      <div class="explore-card-meta" style="color:var(--red)">Error: ${escapeHtml(data.error)}</div>`;
     return;
   }
 
@@ -820,11 +820,11 @@ function renderExploreCard(card, data) {
   }
 
   const adaptBadge = skipped
-    ? `<span style="color:var(--text3);font-size:11px"> · déjà connu</span>`
-    : (pplBefore != null ? `<span style="color:var(--green);font-size:11px"> · adapté</span>` : '');
+    ? `<span style="color:var(--text3);font-size:11px"> · already known</span>`
+    : (pplBefore != null ? `<span style="color:var(--green);font-size:11px"> · adapted</span>` : '');
 
   card.innerHTML = `
-    <div class="explore-card-title">${escapeHtml(data.title || '(sans titre)')}</div>
+    <div class="explore-card-title">${escapeHtml(data.title || '(no title)')}</div>
     <div class="explore-card-url">${escapeHtml(data.url || '')}</div>
     <div class="explore-card-meta">${chars}${adaptBadge}</div>
     ${pplHtml}
@@ -873,13 +873,13 @@ function startAutoExplore(seedUrl, nPages, keywords) {
       const card = document.createElement('div');
       card.className = 'explore-card error-card';
       card.innerHTML = `<div class="explore-card-url">${escapeHtml(msg.url || '')}</div>
-        <div class="explore-card-meta" style="color:var(--red)">Erreur: ${escapeHtml(msg.error)}</div>`;
+        <div class="explore-card-meta" style="color:var(--red)">Error: ${escapeHtml(msg.error)}</div>`;
       feed.appendChild(card);
 
     } else if (msg.type === 'done') {
       const banner = document.createElement('div');
       banner.className = 'explore-done-banner';
-      banner.textContent = `Exploration terminée — ${msg.n_pages} pages, ${(msg.total_chars || 0).toLocaleString()} caractères`;
+      banner.textContent = `Exploration complete — ${msg.n_pages} pages, ${(msg.total_chars || 0).toLocaleString()} characters`;
       feed.appendChild(banner);
       feed.scrollTop = feed.scrollHeight;
       setExploreRunning(false);
@@ -902,24 +902,24 @@ function startAutoExplore(seedUrl, nPages, keywords) {
  */
 async function adaptText(text) {
   const resultEl = $('explore-text-result');
-  resultEl.textContent = 'Adaptation en cours…';
+  resultEl.textContent = 'Adapting…';
   resultEl.style.color = 'var(--yellow)';
   try {
     const res = await api('/api/explore/text', 'POST', { text });
     if (res.error) {
-      resultEl.textContent = 'Erreur: ' + res.error;
+      resultEl.textContent = 'Error: ' + res.error;
       resultEl.style.color = 'var(--red)';
     } else if (res.skipped) {
-      resultEl.textContent = `Ignoré — perplexité ${res.ppl?.toFixed(1)} < seuil`;
+      resultEl.textContent = `Skipped — perplexity ${res.ppl?.toFixed(1)} below gate`;
       resultEl.style.color = 'var(--text3)';
     } else {
-      resultEl.textContent = `Adapté — ppl ${res.ppl?.toFixed(1)}, loss ${res.loss?.toFixed(4)}, norme ${res.adapter_norm?.toFixed(4)}`;
+      resultEl.textContent = `Adapted — ppl ${res.ppl?.toFixed(1)}, loss ${res.loss?.toFixed(4)}, norm ${res.adapter_norm?.toFixed(4)}`;
       resultEl.style.color = 'var(--green)';
       // Refresh adapt stats if visible
       loadTTLStats();
     }
   } catch (err) {
-    resultEl.textContent = 'Erreur: ' + err.message;
+    resultEl.textContent = 'Error: ' + err.message;
     resultEl.style.color = 'var(--red)';
   }
 }
@@ -929,11 +929,11 @@ function setExploreRunning(running) {
   $('explore-stop-btn').disabled = !running;
   const badge = $('explore-status-badge');
   if (running) {
-    badge.textContent = 'Exploration en cours…';
+    badge.textContent = 'Exploring…';
     badge.style.color = 'var(--green)';
     badge.style.borderColor = 'var(--green)';
   } else {
-    badge.textContent = 'Prêt';
+    badge.textContent = 'Ready';
     badge.style.color = 'var(--text2)';
     badge.style.borderColor = 'var(--border)';
   }
@@ -994,12 +994,12 @@ async function loadTTLStats() {
 
     const msg = $('adapt-status-msg');
     if (!data.enabled) {
-      msg.textContent = 'TTL désactivé — le modèle n\'apprend pas en temps réel.';
+      msg.textContent = 'TTL disabled — the model is not learning in real time.';
       msg.style.color = 'var(--text2)';
       return;
     }
 
-    msg.textContent = 'TTL actif — le modèle s\'adapte à chaque nouvelle page.';
+    msg.textContent = 'TTL active — the model adapts to each new page.';
     msg.style.color = 'var(--green)';
 
     $('ttl-n-adapters').textContent = data.n_adapters ?? '—';
@@ -1037,14 +1037,14 @@ async function enableTTL(rank, lr, steps, gate) {
       ppl_gate:     gate,
     });
     if (res.error) {
-      $('adapt-status-msg').textContent = 'Erreur: ' + res.error;
+      $('adapt-status-msg').textContent = 'Error: ' + res.error;
       $('adapt-status-msg').style.color = 'var(--red)';
       $('ttl-toggle').checked = false;
     } else {
       await loadTTLStats();
     }
   } catch (e) {
-    $('adapt-status-msg').textContent = 'Erreur: ' + e.message;
+    $('adapt-status-msg').textContent = 'Error: ' + e.message;
     $('ttl-toggle').checked = false;
   }
 }
@@ -1068,13 +1068,13 @@ async function resetAdapters() {
   try {
     const res = await api('/api/ttl/reset', 'POST');
     if (res.error) {
-      alert('Erreur: ' + res.error);
+      alert('Error: ' + res.error);
     } else {
       adaptState.normHistory = [];
       await loadTTLStats();
     }
   } catch (e) {
-    alert('Erreur: ' + e.message);
+    alert('Error: ' + e.message);
   }
 }
 

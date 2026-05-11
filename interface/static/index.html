@@ -384,27 +384,27 @@
         </button>
         <button class="tab-btn" data-tab="train">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11 4a1 1 0 10-2 0v4a1 1 0 102 0V7zm-3 1a1 1 0 10-2 0v3a1 1 0 102 0V8zM8 9a1 1 0 00-2 0v2a1 1 0 102 0V9z" clip-rule="evenodd"/></svg>
-          Entraînement
+          Training
         </button>
         <!-- Adapt tab — brain icon -->
         <button class="tab-btn" data-tab="adapt">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd"/></svg>
-          Adaptation
+          Adapt (TTL)
         </button>
         <button class="tab-btn" data-tab="info">
           <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>
-          Modèle
+          Model
         </button>
       </nav>
 
       <div id="model-status">
         <div id="status-dot"></div>
-        <div id="status-text">Chargement...</div>
+        <div id="status-text">Loading…</div>
       </div>
 
       <div id="sidebar-params">
         <div class="param-group">
-          <label>Température <span id="temp-val">0.8</span></label>
+          <label>Temperature <span id="temp-val">0.8</span></label>
           <input type="range" id="temperature" min="0.1" max="2.0" step="0.05" value="0.8" />
         </div>
         <div class="param-group">
@@ -416,7 +416,7 @@
           <input type="range" id="max_tokens" min="50" max="1000" step="10" value="300" />
         </div>
         <div class="param-group">
-          <label>Stratégie</label>
+          <label>Strategy</label>
           <select id="strategy">
             <option value="top_p">Nucleus (top-p)</option>
             <option value="top_k">Top-K</option>
@@ -434,14 +434,14 @@
       <!-- ── CHAT TAB ─────────────────────────────────────────── -->
       <section id="tab-chat" class="tab-panel active">
         <div id="chat-header">
-          <h2>Chat NFN</h2>
-          <button id="chat-clear" class="btn-icon" title="Effacer la conversation">
+          <h2>NFN Chat</h2>
+          <button id="chat-clear" class="btn-icon" title="Clear conversation">
             <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
           </button>
         </div>
         <div id="chat-messages"></div>
         <div id="chat-input-area">
-          <textarea id="chat-input" placeholder="Écris un message…" rows="1"></textarea>
+          <textarea id="chat-input" placeholder="Type a message…" rows="1"></textarea>
           <button id="chat-send" class="btn-primary">
             <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/></svg>
           </button>
@@ -451,7 +451,7 @@
       <!-- ── CODE TAB ─────────────────────────────────────────── -->
       <section id="tab-code" class="tab-panel">
         <div id="code-header">
-          <h2>Éditeur de Code</h2>
+          <h2>Code Editor</h2>
           <select id="code-language">
             <option value="python">Python</option>
             <option value="javascript">JavaScript</option>
@@ -464,20 +464,20 @@
             <option value="bash">Bash</option>
           </select>
           <div id="code-actions">
-            <button id="code-complete" class="btn-sm">Compléter</button>
-            <button id="code-explain" class="btn-sm">Expliquer</button>
-            <button id="code-refactor" class="btn-sm">Refactoriser</button>
-            <button id="code-generate" class="btn-sm btn-primary">Générer</button>
+            <button id="code-complete" class="btn-sm">Complete</button>
+            <button id="code-explain" class="btn-sm">Explain</button>
+            <button id="code-refactor" class="btn-sm">Refactor</button>
+            <button id="code-generate" class="btn-sm btn-primary">Generate</button>
           </div>
         </div>
         <div id="code-layout">
           <div id="code-left">
-            <div class="panel-label">Code d'entrée</div>
-            <textarea id="code-input" spellcheck="false" placeholder="# Colle ou écris ton code ici…&#10;# Ou décris ce que tu veux générer dans le champ ci-dessous"></textarea>
-            <textarea id="code-instruction" rows="2" placeholder="Instruction / description (optionnel)…"></textarea>
+            <div class="panel-label">Input Code</div>
+            <textarea id="code-input" spellcheck="false" placeholder="# Paste or write your code here…&#10;# Or describe what you want to generate below"></textarea>
+            <textarea id="code-instruction" rows="2" placeholder="Instruction / description (optional)…"></textarea>
           </div>
           <div id="code-right">
-            <div class="panel-label">Résultat NFN</div>
+            <div class="panel-label">NFN Output</div>
             <div id="code-output"></div>
           </div>
         </div>
@@ -486,13 +486,13 @@
       <!-- ── AGENT TAB ─────────────────────────────────────────── -->
       <section id="tab-agent" class="tab-panel">
         <div id="agent-header">
-          <h2>Agent de Raisonnement</h2>
-          <button id="agent-clear" class="btn-icon" title="Réinitialiser">
+          <h2>Reasoning Agent</h2>
+          <button id="agent-clear" class="btn-icon" title="Reset">
             <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
           </button>
         </div>
         <div id="agent-description">
-          <p>L'agent NFN décompose ton objectif en étapes et utilise des outils pour raisonner.</p>
+          <p>The NFN agent breaks down your goal into steps and uses tools to reason.</p>
           <div class="tool-badges">
             <span class="badge">🧮 calculate(expr)</span>
             <span class="badge">🔍 search(query)</span>
@@ -502,68 +502,68 @@
         </div>
         <div id="agent-trace"></div>
         <div id="agent-input-area">
-          <input type="text" id="agent-goal" placeholder="Objectif: calcule la racine carrée de 1764, cherche NFN, etc." />
-          <input type="number" id="agent-max-steps" value="5" min="1" max="10" style="width:70px" title="Max étapes" />
-          <button id="agent-run" class="btn-primary">Exécuter</button>
+          <input type="text" id="agent-goal" placeholder="Goal: compute sqrt(1764), search NFN, explain recursion…" />
+          <input type="number" id="agent-max-steps" value="5" min="1" max="10" style="width:70px" title="Max steps" />
+          <button id="agent-run" class="btn-primary">Run</button>
         </div>
       </section>
 
       <!-- ── EXPLORE TAB ─────────────────────────────────────────── -->
       <section id="tab-explore" class="tab-panel">
         <div id="explore-header">
-          <h2>Explorer le Web</h2>
-          <span id="explore-status-badge" style="font-size:12px;padding:4px 12px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);">Prêt</span>
+          <h2>Web Explorer</h2>
+          <span id="explore-status-badge" style="font-size:12px;padding:4px 12px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);color:var(--text2);">Ready</span>
         </div>
         <div id="explore-layout">
           <!-- Left controls panel -->
           <div id="explore-left">
             <!-- Single URL fetch -->
-            <div class="explore-section-title">Récupérer une page</div>
+            <div class="explore-section-title">Fetch a page</div>
             <div id="explore-url-row">
               <input type="text" id="explore-url-input" placeholder="https://example.com" />
-              <button id="explore-fetch-btn" class="btn-sm">Récupérer</button>
+              <button id="explore-fetch-btn" class="btn-sm">Fetch</button>
             </div>
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer">
               <input type="checkbox" id="explore-adapt-check" checked />
-              Adapter le modèle (TTL)
+              Adapt model (TTL)
             </label>
 
             <hr style="border:none;border-top:1px solid var(--border);margin:4px 0" />
 
             <!-- Auto-explore -->
-            <div class="explore-section-title">Exploration autonome</div>
+            <div class="explore-section-title">Autonomous exploration</div>
             <div class="explore-auto-params">
               <div class="explore-param-row">
-                <label>URL de départ</label>
+                <label>Seed URL</label>
               </div>
-              <input type="text" id="explore-seed-input" placeholder="https://fr.wikipedia.org/wiki/Intelligence_artificielle" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:7px 10px;font-family:var(--font);font-size:12px;outline:none" />
+              <input type="text" id="explore-seed-input" placeholder="https://en.wikipedia.org/wiki/Artificial_intelligence" style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:7px 10px;font-family:var(--font);font-size:12px;outline:none" />
               <div class="explore-param-row">
-                <label>Nombre de pages</label>
+                <label>Number of pages</label>
                 <input type="number" id="explore-npages" value="5" min="1" max="30" />
               </div>
               <div>
-                <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Mots-clés (séparés par des virgules)</label>
-                <input type="text" id="explore-keywords-input" placeholder="intelligence artificielle, apprentissage, réseau neuronal" />
+                <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px">Keywords (comma-separated)</label>
+                <input type="text" id="explore-keywords-input" placeholder="artificial intelligence, learning, neural network" />
               </div>
-              <button id="explore-auto-btn" class="btn-primary" style="width:100%">Lancer l'exploration</button>
-              <button id="explore-stop-btn" class="btn-danger" style="width:100%" disabled>Arrêter</button>
+              <button id="explore-auto-btn" class="btn-primary" style="width:100%">Start exploration</button>
+              <button id="explore-stop-btn" class="btn-danger" style="width:100%" disabled>Stop</button>
             </div>
 
             <hr style="border:none;border-top:1px solid var(--border);margin:4px 0" />
 
             <!-- Direct text adaptation -->
-            <div class="explore-section-title">Adapter depuis du texte</div>
-            <textarea id="explore-text-area" placeholder="Colle ici du texte brut pour que le modèle l'apprenne directement…"></textarea>
-            <button id="explore-adapt-text-btn" class="btn-sm" style="width:100%">Adapter depuis ce texte</button>
+            <div class="explore-section-title">Adapt from text</div>
+            <textarea id="explore-text-area" placeholder="Paste raw text here — the model will learn from it directly…"></textarea>
+            <button id="explore-adapt-text-btn" class="btn-sm" style="width:100%">Adapt from this text</button>
             <div id="explore-text-result" style="font-size:11px;color:var(--green);min-height:16px"></div>
           </div>
 
           <!-- Right feed panel -->
           <div id="explore-right">
-            <div class="panel-label">Fil d'exploration</div>
+            <div class="panel-label">Exploration feed</div>
             <div id="explore-feed">
               <div style="color:var(--text3);font-size:13px;text-align:center;margin-top:40px">
-                Récupérez une page ou lancez une exploration pour voir les résultats ici.
+                Fetch a page or start an exploration to see results here.
               </div>
             </div>
           </div>
@@ -573,20 +573,20 @@
       <!-- ── TRAINING TAB ─────────────────────────────────────── -->
       <section id="tab-train" class="tab-panel">
         <div id="train-header">
-          <h2>Entraînement BPTP</h2>
+          <h2>BPTP Training</h2>
           <div id="train-status-badge"></div>
         </div>
         <div id="train-layout">
           <div id="train-left">
-            <div class="panel-label">Corpus d'entraînement</div>
-            <textarea id="train-text" rows="10" placeholder="Colle ici le texte d'entraînement…&#10;&#10;Exemple: Shakespeare, articles, code source, etc."></textarea>
+            <div class="panel-label">Training corpus</div>
+            <textarea id="train-text" rows="10" placeholder="Paste training text here…&#10;&#10;Example: Shakespeare, articles, source code, etc."></textarea>
             <div class="train-params">
               <div class="param-row">
-                <label>Époques</label>
+                <label>Epochs</label>
                 <input type="number" id="train-epochs" value="3" min="1" max="100" />
               </div>
               <div class="param-row">
-                <label>Longueur contexte</label>
+                <label>Context length</label>
                 <input type="number" id="train-seq-len" value="128" min="32" max="512" step="32" />
               </div>
               <div class="param-row">
@@ -598,7 +598,7 @@
                 <input type="number" id="train-lr" value="0.0003" step="0.0001" />
               </div>
               <div class="param-row">
-                <label>Config modèle</label>
+                <label>Model config</label>
                 <select id="train-config">
                   <option value="nano">Nano (2M params)</option>
                   <option value="small">Small (15M params)</option>
@@ -607,17 +607,17 @@
               </div>
             </div>
             <div id="train-buttons">
-              <button id="train-start" class="btn-primary">▶ Démarrer</button>
-              <button id="train-stop" class="btn-danger" disabled>⏹ Arrêter</button>
-              <button id="train-load-sample" class="btn-sm">Charger exemple</button>
+              <button id="train-start" class="btn-primary">▶ Start</button>
+              <button id="train-stop" class="btn-danger" disabled>⏹ Stop</button>
+              <button id="train-load-sample" class="btn-sm">Load sample</button>
             </div>
           </div>
           <div id="train-right">
-            <div class="panel-label">Métriques en direct</div>
+            <div class="panel-label">Live metrics</div>
             <canvas id="loss-chart" width="500" height="220"></canvas>
             <div id="train-metrics">
               <div class="metric-card">
-                <div class="metric-label">Loss (tâche)</div>
+                <div class="metric-label">Loss (task)</div>
                 <div id="m-loss" class="metric-val">—</div>
               </div>
               <div class="metric-card">
@@ -625,11 +625,11 @@
                 <div id="m-phase" class="metric-val">—</div>
               </div>
               <div class="metric-card">
-                <div class="metric-label">Étape</div>
+                <div class="metric-label">Step</div>
                 <div id="m-step" class="metric-val">0</div>
               </div>
               <div class="metric-card">
-                <div class="metric-label">LR actuel</div>
+                <div class="metric-label">Current LR</div>
                 <div id="m-lr" class="metric-val">—</div>
               </div>
             </div>
@@ -641,74 +641,74 @@
       <!-- ── ADAPT (TTL) TAB ─────────────────────────────────── -->
       <section id="tab-adapt" class="tab-panel">
         <div id="adapt-header">
-          <h2>Adaptation Test-Time (TTL)</h2>
-          <button id="adapt-refresh-btn" class="btn-sm">Actualiser stats</button>
+          <h2>Test-Time Learning (TTL)</h2>
+          <button id="adapt-refresh-btn" class="btn-sm">Refresh stats</button>
         </div>
         <div id="adapt-layout">
           <!-- Left: controls -->
           <div id="adapt-left">
             <!-- Enable/disable toggle -->
             <div class="adapt-toggle-row">
-              <span class="adapt-toggle-label">Activer l'adaptation TTL</span>
+              <span class="adapt-toggle-label">Enable TTL adaptation</span>
               <label class="toggle-switch">
                 <input type="checkbox" id="ttl-toggle" />
                 <div class="toggle-track"></div>
               </label>
             </div>
-            <div id="adapt-status-msg">TTL désactivé — le modèle n'apprend pas en temps réel.</div>
+            <div id="adapt-status-msg">TTL disabled — the model is not learning in real time.</div>
 
             <hr style="border:none;border-top:1px solid var(--border)" />
 
             <!-- Adapter rank slider -->
             <div class="adapt-param-section">
-              <label>Rang adaptateur (LoRA) <span id="adapt-rank-val">8</span></label>
+              <label>Adapter rank (LoRA) <span id="adapt-rank-val">8</span></label>
               <input type="range" id="adapt-rank" min="1" max="64" step="1" value="8"
                      oninput="document.getElementById('adapt-rank-val').textContent=this.value" />
             </div>
 
             <!-- LR slider -->
             <div class="adapt-param-section">
-              <label>Taux d'apprentissage <span id="adapt-lr-val">2e-4</span></label>
+              <label>Learning rate <span id="adapt-lr-val">2e-4</span></label>
               <input type="range" id="adapt-lr" min="1" max="100" step="1" value="20"
                      oninput="document.getElementById('adapt-lr-val').textContent=(this.value*1e-5).toExponential(1)" />
             </div>
 
             <!-- Steps slider -->
             <div class="adapt-param-section">
-              <label>Étapes gradient / appel <span id="adapt-steps-val">4</span></label>
+              <label>Gradient steps / call <span id="adapt-steps-val">4</span></label>
               <input type="range" id="adapt-steps" min="1" max="16" step="1" value="4"
                      oninput="document.getElementById('adapt-steps-val').textContent=this.value" />
             </div>
 
             <!-- PPL gate -->
             <div class="adapt-param-section">
-              <label>Seuil perplexité (ppl_gate) <span id="adapt-gate-val">30</span></label>
+              <label>Perplexity gate (ppl_gate) <span id="adapt-gate-val">30</span></label>
               <input type="range" id="adapt-gate" min="5" max="200" step="5" value="30"
                      oninput="document.getElementById('adapt-gate-val').textContent=this.value" />
             </div>
 
             <hr style="border:none;border-top:1px solid var(--border)" />
 
-            <button id="adapt-reset-btn" class="btn-danger" style="width:100%">Réinitialiser les adaptateurs</button>
+            <button id="adapt-reset-btn" class="btn-danger" style="width:100%">Reset adapters</button>
           </div>
 
           <!-- Right: stats and chart -->
           <div id="adapt-right">
-            <div class="panel-label">Statistiques adaptateurs</div>
+            <div class="panel-label">Adapter statistics</div>
 
             <div class="ttl-stats-grid" id="ttl-stats-grid">
-              <div class="ttl-stat-card"><div class="ttl-stat-label">Nb adaptateurs</div><div class="ttl-stat-val" id="ttl-n-adapters">—</div></div>
-              <div class="ttl-stat-card"><div class="ttl-stat-label">Paramètres</div><div class="ttl-stat-val" id="ttl-params">—</div></div>
-              <div class="ttl-stat-card"><div class="ttl-stat-label">Appels adapt.</div><div class="ttl-stat-val" id="ttl-calls">—</div></div>
-              <div class="ttl-stat-card"><div class="ttl-stat-label">Ignorés (ppl)</div><div class="ttl-stat-val" id="ttl-skipped">—</div></div>
-              <div class="ttl-stat-card" style="grid-column:1/-1"><div class="ttl-stat-label">Perte moyenne</div><div class="ttl-stat-val" id="ttl-avg-loss">—</div></div>
+              <div class="ttl-stat-card"><div class="ttl-stat-label">Adapters</div><div class="ttl-stat-val" id="ttl-n-adapters">—</div></div>
+              <div class="ttl-stat-card"><div class="ttl-stat-label">Parameters</div><div class="ttl-stat-val" id="ttl-params">—</div></div>
+              <div class="ttl-stat-card"><div class="ttl-stat-label">Adapt calls</div><div class="ttl-stat-val" id="ttl-calls">—</div></div>
+              <div class="ttl-stat-card"><div class="ttl-stat-label">Skipped (ppl)</div><div class="ttl-stat-val" id="ttl-skipped">—</div></div>
+              <div class="ttl-stat-card" style="grid-column:1/-1"><div class="ttl-stat-label">Avg loss</div><div class="ttl-stat-val" id="ttl-avg-loss">—</div></div>
             </div>
 
             <!-- Norm gauge -->
             <div class="adapter-norm-chart-wrap">
-              <div class="adapt-chart-title">Norme adaptateur (moyenne)</div>
+              <div class="adapt-chart-title">Adapter norm (mean)</div>
               <div class="norm-gauge-wrap">
-                <span class="norm-gauge-label">Norme courante</span>
+                <span class="norm-gauge-label">Current norm</span>
                 <div class="norm-gauge-track">
                   <div class="norm-gauge-fill" id="norm-gauge-fill" style="width:0%"></div>
                 </div>
@@ -719,7 +719,7 @@
 
             <!-- Adapter ratio info -->
             <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 14px">
-              <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Ratio paramètres adaptés / total</div>
+              <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Adapted / total parameter ratio</div>
               <div id="ttl-ratio" style="font-size:18px;font-weight:600;color:var(--primary2);font-family:var(--mono)">—</div>
             </div>
           </div>
@@ -729,10 +729,10 @@
       <!-- ── INFO TAB ─────────────────────────────────────────── -->
       <section id="tab-info" class="tab-panel">
         <div id="info-header">
-          <h2>Modèle NFN</h2>
+          <h2>NFN Model</h2>
           <div id="info-actions">
-            <button id="info-save" class="btn-sm">Sauvegarder</button>
-            <button id="info-reload" class="btn-sm">Recharger</button>
+            <button id="info-save" class="btn-sm">Save</button>
+            <button id="info-reload" class="btn-sm">Reload</button>
           </div>
         </div>
         <div id="info-layout">
@@ -741,22 +741,22 @@
             <div id="model-params-grid"></div>
           </div>
           <div id="fractal-viz">
-            <h3>Topologie Fractale</h3>
+            <h3>Fractal Topology</h3>
             <canvas id="fractal-canvas" width="460" height="320"></canvas>
             <div id="viz-controls">
-              <button class="viz-btn active" data-motif="binary_tree">Arbre Binaire</button>
+              <button class="viz-btn active" data-motif="binary_tree">Binary Tree</button>
               <button class="viz-btn" data-motif="cantor">Cantor</button>
               <button class="viz-btn" data-motif="sierpinski">Sierpinski</button>
             </div>
           </div>
           <div id="phase-viz">
-            <h3>Oscillations de Phase</h3>
+            <h3>Phase Oscillations</h3>
             <canvas id="phase-canvas" width="460" height="200"></canvas>
           </div>
           <div id="load-model-panel">
-            <h3>Charger un checkpoint</h3>
+            <h3>Load checkpoint</h3>
             <input type="text" id="ckpt-path" placeholder="checkpoints/nfn_final.pt" />
-            <button id="ckpt-load-btn" class="btn-primary">Charger</button>
+            <button id="ckpt-load-btn" class="btn-primary">Load</button>
           </div>
         </div>
       </section>
