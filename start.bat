@@ -12,34 +12,64 @@ echo.
 REM ── Check Python ─────────────────────────────────────────────────────────────
 where python >nul 2>&1
 if errorlevel 1 (
-    echo  [ERROR] Python not found on your system.
-    echo.
-    echo  Install Python 3.10 or later from:
-    echo  https://www.python.org/downloads/
+    echo  [ERROR] Python not found.
+    echo  Install from https://www.python.org/downloads/
+    echo  Check "Add Python to PATH" during install.
     echo.
     pause
     exit /b 1
 )
 
-REM ── Free port 8000 if already in use ─────────────────────────────────────────
-echo  Checking port 8000...
+python --version
+echo.
+
+REM ── Install / check dependencies ─────────────────────────────────────────────
+python -c "import numpy, torch, fastapi, uvicorn" >nul 2>&1
+if errorlevel 1 (
+    echo  [INFO] Installing required packages (first run)...
+    pip install -r requirements.txt
+    if errorlevel 1 (
+        echo  [ERROR] pip install failed.
+        echo  Try: pip install -r requirements.txt
+        echo.
+        pause
+        exit /b 1
+    )
+    echo.
+)
+
+REM ── Free port 8000 ───────────────────────────────────────────────────────────
+echo  Freeing port 8000...
 for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":8000 "') do (
-    echo  Stopping previous instance (PID %%a)...
     taskkill /PID %%a /F >nul 2>&1
 )
-timeout /t 1 /nobreak >nul
+timeout /t 2 /nobreak >nul
 
-REM ── Launch ───────────────────────────────────────────────────────────────────
+REM ── Launch (try port 8000, fall back to 8080) ─────────────────────────────────
+echo  Starting server...
+echo.
 python run.py %*
+set EXIT_CODE=%errorlevel%
+
+if %EXIT_CODE% equ 0 goto :done
+
+REM If it failed, check if it was a port conflict and retry on 8080
+echo.
+echo  [INFO] Port 8000 may still be busy. Trying port 8080...
+echo.
+for /f "tokens=5" %%a in ('netstat -aon 2^>nul ^| findstr ":8080 "') do (
+    taskkill /PID %%a /F >nul 2>&1
+)
+timeout /t 2 /nobreak >nul
+python run.py --port 8080 %*
 if errorlevel 1 (
     echo.
-    echo  [ERROR] The NFN AGI server encountered an error.
+    echo  [ERROR] Could not start the server.
     echo.
-    echo  Troubleshooting:
-    echo    1. Make sure Python 3.10+ is installed
-    echo    2. Install dependencies:  pip install -r requirements.txt
-    echo    3. Check the logs above for details
-    echo    4. If port 8000 is busy, use:  python run.py --port 8080
+    echo  Try running manually:
+    echo    python run.py --port 9000
     echo.
     pause
 )
+
+:done
