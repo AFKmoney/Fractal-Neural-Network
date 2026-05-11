@@ -179,16 +179,26 @@ function initCode() {
     const output = $('code-output');
     const params = getParams();
 
-    output.textContent = '⏳ NFN generating…';
+    if (task !== 'generate' && !code.trim()) {
+      output.textContent = '⚠ Paste some code first (or use Generate to write from scratch).';
+      return;
+    }
+
+    output.textContent = '⏳ NFN working…';
     try {
       const res = await api('/api/code', 'POST', {
+        task,
         code,
         instruction,
         language,
         max_tokens: params.max_tokens,
         temperature: task === 'generate' ? params.temperature : 0.4,
       });
-      output.textContent = res.result || res.explanation || res.refactored || JSON.stringify(res);
+      if (res.error) {
+        output.textContent = '⚠ ' + res.error;
+      } else {
+        output.textContent = res.result || JSON.stringify(res);
+      }
     } catch (e) {
       output.textContent = '⚠ Error: ' + e.message;
     }
@@ -278,6 +288,13 @@ NFN can model very long-range dependencies without parameter explosion.
 Spontaneous synchronisation of oscillators implements temporal binding.
 `;
 
+// Training hyperparameter presets — applied when user picks a preset
+const TRAIN_PRESETS = {
+  nano:   { lr: 0.0003, batch_size: 4,  seq_len: 128, n_epochs: 3  },
+  small:  { lr: 0.0001, batch_size: 2,  seq_len: 256, n_epochs: 2  },
+  medium: { lr: 0.00003, batch_size: 1, seq_len: 256, n_epochs: 1  },
+};
+
 function initTraining() {
   const startBtn = $('train-start');
   const stopBtn = $('train-stop');
@@ -289,17 +306,29 @@ function initTraining() {
     $('train-text').value = SAMPLE_TEXT;
   });
 
+  // Preset selector: auto-fill hyperparams
+  const configSel = $('train-config');
+  if (configSel) {
+    configSel.addEventListener('change', () => {
+      const preset = TRAIN_PRESETS[configSel.value];
+      if (!preset) return;
+      $('train-lr').value = preset.lr;
+      $('train-batch').value = preset.batch_size;
+      $('train-seq-len').value = preset.seq_len;
+      $('train-epochs').value = preset.n_epochs;
+    });
+  }
+
   startBtn.addEventListener('click', async () => {
     const text = $('train-text').value.trim();
-    if (!text) { addLog('⚠ Empty text', 'bad'); return; }
+    if (!text) { addLog('⚠ Paste some training text first', 'bad'); return; }
 
     const body = {
       text,
-      n_epochs: parseInt($('train-epochs').value),
-      seq_len: parseInt($('train-seq-len').value),
-      batch_size: parseInt($('train-batch').value),
-      lr: parseFloat($('train-lr').value),
-      config_name: $('train-config').value,
+      n_epochs:   parseInt($('train-epochs').value)  || 3,
+      seq_len:    parseInt($('train-seq-len').value)  || 128,
+      batch_size: parseInt($('train-batch').value)    || 4,
+      lr:         parseFloat($('train-lr').value)     || 3e-4,
     };
 
     const res = await api('/api/train/start', 'POST', body);
@@ -452,10 +481,20 @@ function initInfo() {
   // Load checkpoint
   $('ckpt-load-btn').addEventListener('click', async () => {
     const path = $('ckpt-path').value.trim();
-    if (!path) return;
+    if (!path) { alert('Enter a checkpoint path first (e.g. checkpoints/nfn_saved.pt)'); return; }
+    const loadBtn = $('ckpt-load-btn');
+    loadBtn.disabled = true;
+    loadBtn.textContent = 'Loading…';
     const res = await api('/api/load_model', 'POST', { path });
-    if (res.error) alert('Error: ' + res.error);
-    else { alert(`Model loaded: ${res.params}`); refreshStatus(); refreshInfo(); }
+    loadBtn.disabled = false;
+    loadBtn.textContent = 'Load';
+    if (res.error) {
+      alert('Error loading checkpoint:\n' + res.error);
+    } else {
+      await refreshStatus();
+      refreshInfo();
+      alert(`Model loaded — ${state.modelInfo?.params ?? 'ok'}`);
+    }
   });
 
   drawFractal('binary_tree');
@@ -804,7 +843,7 @@ function renderExploreCard(card, data) {
     const maxPpl = 100;
     const bPct = Math.min(100, (parseFloat(pplBefore) / maxPpl) * 100).toFixed(1);
     pplHtml = `<div class="ppl-bars">
-      <span class="ppl-label">Perplexité</span>
+      <span class="ppl-label">Perplexity</span>
       <div class="ppl-bar-wrap"><div class="ppl-bar-fill" style="width:${bPct}%"></div></div>
       <span class="ppl-val">${pplBefore}</span>
     </div>`;

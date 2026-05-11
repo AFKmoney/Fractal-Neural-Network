@@ -403,24 +403,41 @@ class AGIInferenceEngine:
 
     def status(self) -> Dict:
         params = sum(p.numel() for p in self.model.parameters())
+        motifs = getattr(self.cfg, "motifs", ["binary_tree"])
+        n_levels = getattr(self.cfg, "n_levels", 4)
+        tools = []
+        try:
+            tools = list(self.registry._tools.keys())
+        except Exception:
+            pass
         return {
-            "model":        repr(self.model).split("\n")[0],
-            "params":       params,
+            "status": "ready",
+            # Nested model object that the JS info tab reads directly
+            "model": {
+                "params":      f"{params/1e6:.2f}M",
+                "device":      str(self.device),
+                "vocab_size":  self.cfg.vocab_size,
+                "d_model":     self.cfg.d_model,
+                "n_blocks":    self.cfg.n_blocks,
+                "n_levels":    n_levels,
+                "motifs":      motifs,
+                "max_seq_len": self.cfg.max_seq_len,
+            },
+            # Flat fields kept for backwards compat and sidebar badges
             "params_M":     round(params / 1e6, 2),
-            "device":       str(self.device),
-            "vocab_size":   self.cfg.vocab_size,
             "d_model":      self.cfg.d_model,
             "n_blocks":     self.cfg.n_blocks,
+            "vocab_size":   self.cfg.vocab_size,
             "max_seq_len":  self.cfg.max_seq_len,
-            "tools":        list(self.registry._tools.keys()),
+            "tools":        tools,
             "knowledge_entries": len(self.learner.store),
             "features": {
-                "episodic_memory": self.cfg.use_episodic_memory,
-                "working_memory":  self.cfg.use_working_memory,
-                "causal_graph":    self.cfg.use_causal_graph,
-                "goal_predictor":  self.cfg.use_goal_predictor,
-                "self_consistency":self.cfg.use_self_consistency,
-                "free_energy":     self.cfg.use_free_energy,
+                "episodic_memory":   self.cfg.use_episodic_memory,
+                "working_memory":    self.cfg.use_working_memory,
+                "causal_graph":      self.cfg.use_causal_graph,
+                "goal_predictor":    self.cfg.use_goal_predictor,
+                "self_consistency":  self.cfg.use_self_consistency,
+                "free_energy":       self.cfg.use_free_energy,
                 "mixture_of_depths": self.cfg.use_mixture_of_depths,
                 "multi_token_pred":  self.cfg.use_multi_token_pred,
                 "hyper_net":         self.cfg.use_hyper_net,

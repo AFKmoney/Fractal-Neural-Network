@@ -186,6 +186,7 @@ class CodeRequest(BaseModel):
     language:    str   = "python"
     max_tokens:  int   = 512
     temperature: float = 0.4
+    task:        str   = "complete"   # complete | explain | refactor | generate
 
 class LearnRequest(BaseModel):
     text:   str
@@ -209,6 +210,7 @@ class TrainRequest(BaseModel):
     lr:               float = 3e-4
     agi_loss_start:   int   = 100
     agi_loss_ramp:    int   = 50
+    config_name:      str   = ""    # ignored — always trains current model
 
 class LoadModelRequest(BaseModel):
     checkpoint_path: Optional[str] = None
@@ -309,23 +311,24 @@ async def code_endpoint(req: CodeRequest):
     agent  = CodeAgent(engine)
     try:
         import functools
-        # Dispatch based on what was provided
-        if req.instruction and not req.code:
-            fn = functools.partial(agent.generate, req.instruction,
+        task = req.task or ("generate" if not req.code else "complete")
+        if task == "generate":
+            desc = req.instruction or req.code
+            fn = functools.partial(agent.generate, desc,
                                    language=req.language, max_tokens=req.max_tokens)
-            result = await asyncio.to_thread(fn)
-            return JSONResponse({"result": result})
-        elif req.instruction:
-            fn = functools.partial(agent.generate,
-                                   f"{req.instruction}\n\n```{req.language}\n{req.code}\n```",
+        elif task == "explain":
+            fn = functools.partial(agent.explain, req.code,
                                    language=req.language, max_tokens=req.max_tokens)
-            result = await asyncio.to_thread(fn)
-            return JSONResponse({"result": result})
-        else:
+        elif task == "refactor":
+            # Use generate with a refactor instruction
+            desc = f"Refactor this {req.language} code{': ' + req.instruction if req.instruction else ''}.\n\n```{req.language}\n{req.code}\n```"
+            fn = functools.partial(agent.generate, desc,
+                                   language=req.language, max_tokens=req.max_tokens)
+        else:  # complete
             fn = functools.partial(agent.complete, req.code,
                                    language=req.language, max_tokens=req.max_tokens)
-            result = await asyncio.to_thread(fn)
-            return JSONResponse({"result": result})
+        result = await asyncio.to_thread(fn)
+        return JSONResponse({"result": result})
     except Exception as e:
         return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
 
@@ -426,12 +429,26 @@ async def memory_save():
 @app.post("/api/save_model")
 async def save_model_endpoint():
     engine = get_engine()
-    path   = str(ROOT / "checkpoints" / "knowledge_store.json.gz")
+    ckpt_dir = ROOT / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_path = str(ckpt_dir / "nfn_saved.pt")
+    ks_path   = str(ckpt_dir / "knowledge_store.json.gz")
     try:
-        engine.learner.save_store(path)
-        return JSONResponse({"path": path, "entries": len(engine.learner.store)})
+        # Save model weights
+        ckpt = {
+            "model_state": engine.model.state_dict(),
+            "cfg":         engine.cfg.__dict__,
+        }
+        await asyncio.to_thread(torch.save, ckpt, ckpt_path)
+        # Save knowledge store separately
+        engine.learner.save_store(ks_path)
+        return JSONResponse({
+            "path":    ckpt_path,
+            "ks_path": ks_path,
+            "entries": len(engine.learner.store),
+        })
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": str(e), "trace": traceback.format_exc()}, status_code=500)
 
 
 @app.post("/api/load_model")
@@ -626,6 +643,17 @@ async def ws_chat(ws: WebSocket):
             pass
 
 
+def _normalize_metrics(m: Dict) -> Dict:
+    """Normalize trainer metric keys to the format the JS chart expects."""
+    loss = m.get("loss", m.get("lm", m.get("total", 0.0)))
+    loss_phase = m.get("loss_phase", m.get("phase", m.get("soliton", None)))
+    out = dict(m)
+    out["loss"] = loss
+    if loss_phase is not None:
+        out["loss_phase"] = loss_phase
+    return out
+
+
 @app.websocket("/ws/train")
 async def ws_train(ws: WebSocket):
     """Push training metrics to WebSocket clients in real time."""
@@ -636,8 +664,12 @@ async def ws_train(ws: WebSocket):
         while True:
             if len(_train_metrics) > last_sent:
                 for m in _train_metrics[last_sent:]:
-                    await ws.send_json({"type": "metrics", "data": m})
+                    await ws.send_json({"type": "metrics", "data": _normalize_metrics(m)})
                 last_sent = len(_train_metrics)
+            # If training finished, close the WS so the JS shows "Done"
+            running = _train_thread is not None and _train_thread.is_alive()
+            if not running and last_sent > 0 and last_sent == len(_train_metrics):
+                break
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         pass
