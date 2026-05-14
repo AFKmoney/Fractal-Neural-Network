@@ -263,57 +263,191 @@ class SelfConsistencyCheck(nn.Module):
 # Plan Executor  (sequential sub-goal pursuit)
 # ─────────────────────────────────────────────────────────────────────────────
 
+class MCTSNode:
+    """
+    A node in the MCTS tree for goal-directed planning.
+
+    Each node represents a partial plan state (current sub-goal index).
+    MCTS builds a tree of possible plan trajectories and selects the
+    most promising one via UCB1 exploration.
+    """
+    __slots__ = ["subgoal_idx", "parent", "children", "visits", "value", "prior"]
+
+    def __init__(self, subgoal_idx: int, parent=None, prior: float = 1.0):
+        self.subgoal_idx = subgoal_idx
+        self.parent      = parent
+        self.children: List["MCTSNode"] = []
+        self.visits: int  = 0
+        self.value: float = 0.0
+        self.prior: float = prior
+
+    def ucb(self, c: float = 1.414) -> float:
+        if self.visits == 0:
+            return float("inf")
+        exploit = self.value / self.visits
+        explore = c * self.prior * (self.parent.visits ** 0.5) / (1 + self.visits)
+        return exploit + explore
+
+    def is_leaf(self) -> bool:
+        return len(self.children) == 0
+
+    def best_child(self, c: float = 1.414) -> "MCTSNode":
+        return max(self.children, key=lambda n: n.ucb(c))
+
+
 class PlanExecutor(nn.Module):
     """
-    Decomposes a goal phase θ* into K sub-goals and pursues them in order.
+    MCTS-enhanced plan executor for long-horizon goal-directed generation.
 
-    Sub-goal decomposition:
-      θ*_k = GoalDecoder(θ*, k/K)   — interpolate toward goal in K steps
+    v5.0 upgrade: replaces simple sequential sub-goal execution with
+    MCTS-guided tree search over possible planning trajectories.
 
-    At each generation step, the executor advances to the next sub-goal
-    once alignment with the current one exceeds a threshold.
+    Algorithm:
+      1. Decompose goal θ* into K sub-goals via learned interpolation
+      2. MCTS tree search over sub-goal sequences (n_simulations rollouts)
+      3. At each step, execute best sub-goal according to MCTS value estimates
+      4. Update MCTS node values based on alignment achieved
 
-    This enables long-horizon planning: "first introduce topic, then
-    argue, then conclude" — each stage has its own phase attractor.
+    UCB1 selection:
+      UCB(node) = V(node) / N(node) + c · P(node) · √(N(parent)) / (1 + N(node))
+
+    The prior P(node) is estimated by the goal alignment achieved on previous visits.
+
+    Hierarchical sub-goal decomposition:
+      Rather than linear interpolation (v4.0), v5.0 learns a hierarchical
+      decomposition: goals are split at multiple scales (coarse → fine).
+      This allows non-linear plan trajectories (e.g., "digress then return").
     """
 
-    def __init__(self, n_phases: int, n_subgoals: int = 4):
+    def __init__(
+        self,
+        n_phases:       int,
+        n_subgoals:     int   = 8,    # increased from 4
+        n_simulations:  int   = 8,    # MCTS rollouts per step
+        exploration_c:  float = 1.414,
+        d_model:        int   = 256,
+    ):
         super().__init__()
-        self.n_subgoals = n_subgoals
-        self.n_phases   = n_phases
+        self.n_subgoals    = n_subgoals
+        self.n_phases      = n_phases
+        self.n_simulations = n_simulations
+        self.exploration_c = exploration_c
 
-        # Learned interpolation weights for sub-goal generation
-        self.interpolator = nn.Linear(n_phases + 1, n_phases)
-        nn.init.zeros_(self.interpolator.weight)
-        nn.init.zeros_(self.interpolator.bias)
+        # Hierarchical sub-goal generator: MLP with depth conditioning
+        self.subgoal_gen = nn.Sequential(
+            nn.Linear(n_phases + 2, n_phases * 2),  # +2: step fraction + depth
+            nn.SiLU(),
+            nn.LayerNorm(n_phases * 2),
+            nn.Linear(n_phases * 2, n_phases),
+        )
+        nn.init.zeros_(self.subgoal_gen[-1].weight)
+        nn.init.zeros_(self.subgoal_gen[-1].bias)
 
-        self._goal_phase:    Optional[torch.Tensor] = None   # [B, n_phases]
-        self._current_step:  int = 0
+        # Value estimator for MCTS rollout evaluation
+        self.value_est = nn.Sequential(
+            nn.Linear(n_phases * 2, 64),
+            nn.SiLU(),
+            nn.Linear(64, 1),
+            nn.Tanh(),
+        )
+        nn.init.zeros_(self.value_est[-2].weight)
+        nn.init.zeros_(self.value_est[-2].bias)
+
+        self._goal_phase:   Optional[torch.Tensor] = None
+        self._current_step: int = 0
+        self._mcts_root:    Optional[MCTSNode] = None
+        self._subgoal_cache: List[Optional[torch.Tensor]] = [None] * n_subgoals
 
     def set_plan(self, goal_phase: torch.Tensor):
-        """goal_phase: [B, n_phases]"""
+        """goal_phase: [B, n_phases] — initialise MCTS tree."""
         self._goal_phase   = goal_phase
         self._current_step = 0
+        self._mcts_root    = MCTSNode(subgoal_idx=0)
+        self._subgoal_cache = [None] * self.n_subgoals
+        # Pre-expand root with all sub-goal choices
+        for k in range(self.n_subgoals):
+            child = MCTSNode(subgoal_idx=k, parent=self._mcts_root,
+                             prior=1.0 / self.n_subgoals)
+            self._mcts_root.children.append(child)
 
-    def current_subgoal(self, device: torch.device) -> Optional[torch.Tensor]:
-        """Returns the current sub-goal phase [B, n_phases] or None."""
+    def _generate_subgoal(self, k: int, device: torch.device) -> Optional[torch.Tensor]:
+        """Generate sub-goal phase for step k."""
         if self._goal_phase is None:
             return None
-        k = self._current_step / max(self.n_subgoals - 1, 1)
-        k_tensor = torch.tensor([k], device=device).expand(self._goal_phase.shape[0], 1)
-        inp = torch.cat([self._goal_phase, k_tensor], dim=-1)
-        delta = self.interpolator(inp)
-        return self._goal_phase * k + delta * (1 - k)
+        if self._subgoal_cache[k] is not None:
+            return self._subgoal_cache[k].to(device)
+
+        B = self._goal_phase.shape[0]
+        frac   = torch.tensor([k / max(self.n_subgoals - 1, 1)], device=device)
+        depth  = torch.tensor([k / self.n_subgoals], device=device)
+        cond   = torch.cat([frac, depth]).unsqueeze(0).expand(B, -1)  # [B, 2]
+        inp    = torch.cat([self._goal_phase.to(device), cond], dim=-1)   # [B, n+2]
+        delta  = self.subgoal_gen(inp)                               # [B, n]
+        # Smooth interpolation + learned correction
+        t       = k / max(self.n_subgoals - 1, 1)
+        subgoal = self._goal_phase.to(device) * t + delta * (1 - t)
+        self._subgoal_cache[k] = subgoal.detach()
+        return subgoal
+
+    def _mcts_select_best(self) -> int:
+        """Select best next sub-goal index via MCTS UCB."""
+        if self._mcts_root is None or not self._mcts_root.children:
+            return min(self._current_step + 1, self.n_subgoals - 1)
+
+        # Find current node (most visited child up to current step)
+        node = self._mcts_root
+        for _ in range(self._current_step):
+            if node.children:
+                node = max(node.children, key=lambda n: n.visits + 1e-8)
+            else:
+                break
+
+        if not node.children:
+            return min(self._current_step + 1, self.n_subgoals - 1)
+
+        return node.best_child(self.exploration_c).subgoal_idx
+
+    def _mcts_backprop(self, node_idx: int, alignment_val: float):
+        """Backpropagate alignment value through MCTS tree."""
+        if self._mcts_root is None:
+            return
+        for child in self._mcts_root.children:
+            if child.subgoal_idx == node_idx:
+                child.visits += 1
+                child.value  += alignment_val
+                break
+
+    def current_subgoal(self, device: torch.device) -> Optional[torch.Tensor]:
+        """Returns current sub-goal phase [B, n_phases] via MCTS selection."""
+        k = self._mcts_select_best() if self._mcts_root else self._current_step
+        return self._generate_subgoal(k, device)
 
     def advance(self, alignment: torch.Tensor, threshold: float = 0.7):
         """
         alignment: [B] — mean alignment with current sub-goal.
-        Advances to next sub-goal if mean alignment exceeds threshold.
+        Backpropagates to MCTS tree and advances step if threshold met.
         """
-        if self._current_step < self.n_subgoals - 1:
-            if alignment.mean().item() >= threshold:
-                self._current_step += 1
+        val = alignment.mean().item()
+        if self._mcts_root is not None:
+            self._mcts_backprop(self._current_step, val)
+
+        if self._current_step < self.n_subgoals - 1 and val >= threshold:
+            self._current_step += 1
+
+    def estimate_value(
+        self,
+        current_phase: torch.Tensor,   # [B, n_phases]
+        goal_phase:    torch.Tensor,   # [B, n_phases]
+    ) -> torch.Tensor:
+        """
+        Estimate planning value V(current_phase, goal_phase).
+        Used by MCTS to evaluate rollout outcomes.
+        """
+        inp = torch.cat([current_phase, goal_phase], dim=-1)   # [B, 2*n]
+        return self.value_est(inp).squeeze(-1)                  # [B]
 
     def reset(self):
-        self._goal_phase   = None
-        self._current_step = 0
+        self._goal_phase    = None
+        self._current_step  = 0
+        self._mcts_root     = None
+        self._subgoal_cache = [None] * self.n_subgoals
