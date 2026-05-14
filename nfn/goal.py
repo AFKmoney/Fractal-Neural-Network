@@ -236,6 +236,126 @@ class PhaseGoalPredictor(nn.Module):
         goal = self._goal_phase.to(theta.device).unsqueeze(1)
         return (1.0 - torch.cos(theta - goal)).mean()
 
+    def reward_goal_achievement(self, theta: torch.Tensor) -> torch.Tensor:
+        """
+        Compute a reward signal for achieving the current goal.
+
+        Returns [B] reward ∈ [0, 1] — high when phases are well-aligned with θ*.
+        Can be used as an intrinsic reward signal for RL-style training.
+        """
+        if self._goal_phase is None:
+            B = theta.shape[0]
+            return torch.zeros(B, device=theta.device)
+        goal      = self._goal_phase.to(theta.device).unsqueeze(1)
+        alignment = torch.cos(theta - goal).mean(-1)   # [B, L]
+        return alignment.mean(-1).clamp(0.0, 1.0)      # [B]
+
     def reset_goal(self):
         """Call between generation episodes."""
         self._goal_phase = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Hierarchical Goal Decomposition  (v5.0 upgrade)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class HierarchicalGoalDecomposer(nn.Module):
+    """
+    Decomposes a high-level goal into a hierarchy of sub-goals.
+
+    Three-level hierarchy:
+      Level 0 (Abstract):    goal_phase → 2 coarse sub-goals
+      Level 1 (Intermediate):each coarse → 2 intermediate sub-goals
+      Level 2 (Concrete):    each intermediate → 2 fine sub-goals
+
+    This creates a binary tree of 8 fine sub-goals from a single goal.
+    The model learns which branch of the tree to pursue at each step.
+
+    Usage:
+      decomposer.set_goal(goal_phase)
+      for step in generation:
+          current_subgoal = decomposer.get_subgoal(alignment_scores)
+          theta = attractor(theta, current_subgoal)
+    """
+
+    def __init__(self, n_phases: int, n_levels: int = 3):
+        super().__init__()
+        self.n_phases = n_phases
+        self.n_levels = n_levels
+        self.n_leaves = 2 ** n_levels    # 8 fine sub-goals
+
+        # Binary splitting network: goal → (left_branch, right_branch)
+        self.splitter = nn.Sequential(
+            nn.Linear(n_phases, n_phases * 2),
+            nn.SiLU(),
+            nn.Linear(n_phases * 2, n_phases * 2),
+        )
+        nn.init.zeros_(self.splitter[-1].weight)
+        nn.init.zeros_(self.splitter[-1].bias)
+
+        # Branch selector: alignment scores → which branch to take
+        self.selector = nn.Sequential(
+            nn.Linear(n_phases * 2, 2),   # binary choice
+            nn.Softmax(dim=-1),
+        )
+
+        self._goal_tree: Optional[List[torch.Tensor]] = None
+        self._current_leaf: int = 0
+
+    def _build_tree(self, goal: torch.Tensor) -> List[torch.Tensor]:
+        """
+        Recursively build goal tree via binary splitting.
+        Returns list of leaf sub-goals [n_leaves, B, n_phases].
+        """
+        tree = [goal]
+        for _ in range(self.n_levels):
+            new_tree = []
+            for node in tree:
+                split = self.splitter(node)                      # [B, 2*n]
+                left  = node + split[:, :self.n_phases] * 0.3   # left branch
+                right = node + split[:, self.n_phases:] * 0.3   # right branch
+                new_tree.extend([left, right])
+            tree = new_tree
+        return tree
+
+    def set_goal(self, goal_phase: torch.Tensor):
+        """Build the goal tree from goal_phase [B, n_phases]."""
+        self._goal_tree    = self._build_tree(goal_phase)
+        self._current_leaf = 0
+
+    def get_subgoal(
+        self,
+        alignment: Optional[torch.Tensor] = None,  # [B] current alignment
+        advance_threshold: float = 0.75,
+    ) -> Optional[torch.Tensor]:
+        """
+        Returns the current leaf sub-goal phase [B, n_phases].
+        Advances to next leaf if alignment threshold exceeded.
+        """
+        if self._goal_tree is None:
+            return None
+
+        if (alignment is not None
+                and alignment.mean().item() >= advance_threshold
+                and self._current_leaf < self.n_leaves - 1):
+            self._current_leaf += 1
+
+        return self._goal_tree[self._current_leaf]
+
+    def hierarchy_loss(self, theta: torch.Tensor) -> torch.Tensor:
+        """
+        Loss to encourage each level of the hierarchy to be reachable.
+        The model should be able to align with any leaf sub-goal.
+        """
+        if self._goal_tree is None:
+            return torch.tensor(0.0, device=theta.device)
+
+        total = torch.tensor(0.0, device=theta.device)
+        for leaf in self._goal_tree:
+            leaf_device = leaf.to(theta.device).unsqueeze(1)
+            total = total + (1.0 - torch.cos(theta - leaf_device)).mean()
+        return total / max(len(self._goal_tree), 1)
+
+    def reset(self):
+        self._goal_tree    = None
+        self._current_leaf = 0
