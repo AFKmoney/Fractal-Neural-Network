@@ -5,6 +5,123 @@
 
 ---
 
+## [5.1.0] — 2026-05-14 — AGI v5.0 upgrades + Cloud Training
+
+### New files — AGI v5.0
+
+#### `nfn/value.py` — Value Function & Reward Learning
+- `ValueHead`: per-token value function V(s_t) — estimates expected return from hidden states
+- `RewardModel`: Bradley-Terry preference model — learns reward from winner/loser pairs
+- `GoalValueHead`: goal-conditioned value V(s, g) — value relative to current goal phase
+- `AdvantageEstimator`: combines all above; computes TD advantages for AWR training
+- **AWR (Advantage-Weighted Regression)**: replaces vanilla CE with advantage-weighted CE
+  — high-advantage tokens get upweighted gradient signal
+
+#### `nfn/intrinsic.py` — Intrinsic Motivation (3-signal)
+- `ForwardDynamicsModel`: inverse + forward model — curiosity = forward model prediction error
+  — learns compact action representation via inverse model without action labels
+- `StateNoveltyTracker`: random projection LSH hash → count-based novelty bonus
+  — exponential decay of visit counts (exploration stays active)
+- `LearningProgressTracker`: EMA of prediction error per state cluster
+  — rewards areas where the model is currently learning fastest
+- `IntrinsicMotivation`: combines all 3 signals with online Welford normalisation
+
+#### `nfn/theory_of_mind.py` — Theory of Mind
+- `AgentBeliefEncoder`: infers compact belief state from observed agent outputs via attention pooling
+- `PerspectiveTaker`: FiLM modulation — adapts hidden states to another agent's perspective
+- `MentalStatePredictor`: predicts agent's next state from inferred belief → self-supervised loss
+- `TheoryOfMindModule`: integrates all; trained from self-play pairs (winner=good agent, loser=bad agent)
+  — contrastive loss pushes winner/loser beliefs apart
+
+### New files — Cloud Training
+
+#### `cloud_train.py` — One-command cloud training CLI
+- 7 training presets from `nano_shakespeare` (5 min) to `large_pile` (48 h on A100)
+- Auto-detects GPU VRAM and recommends optimal preset
+- Auto-tunes batch size based on available VRAM
+- Downloads datasets automatically with progress bars
+- Auto-saves `checkpoints/agi_nfn_latest.pt` every 500 steps (resume after disconnect)
+- Periodic text generation samples during training
+- Phase-aware logging: `[warmup] → [ramp] → [adaptive]`
+
+#### `datasets/downloader.py` — Public Dataset Downloader
+- `DatasetDownloader.get(name)`: download + cache + return as string
+- Supported: `tiny-shakespeare`, `gutenberg-top100`, `wikipedia-en-simple`,
+  `openwebtext-10pct`, `cc-news`, `wikipedia-en`, `pile-10pct`
+- No-dependency progress bar, gzip decompression, Wikipedia XML parsing
+- HuggingFace datasets integration (optional `pip install datasets`)
+- Train/val split helper: `split_train_val(text, val_fraction=0.005)`
+
+#### `setup_cloud.sh` — One-command cloud GPU setup
+- Works on any Ubuntu/Debian cloud instance (Lambda Labs, RunPod, Vast.ai, etc.)
+- Detects CUDA version → installs matching PyTorch build
+- Auto-selects preset based on detected VRAM
+- Optional tmux integration (`--tmux`) — training survives SSH disconnects
+- Can be run via curl: `curl -fsSL .../setup_cloud.sh | bash`
+
+#### `docs/CLOUD_TRAINING.md` — Complete cloud training guide
+- Step-by-step SSH setup for all major cloud providers
+- Cost estimates, GPU recommendations, monitoring guide
+- tmux workflow for SSH-resilient training
+- Troubleshooting section
+
+### Upgraded modules — AGI v5.0
+
+#### `nfn/causal.py` (upgraded)
+- **NOTEARS proper acyclicity**: `tr(e^{A⊙A}) - n` via truncated matrix exponential (Taylor k=3)
+  — stronger DAG constraint than tril-only approximation
+- **Non-linear GNN propagation**: replaces linear `A^T · M` with `MLP([m_i; m_j; A_{ij}])`
+  — captures non-linear causal relationships
+- **`counterfactual_loss()`**: random interventions → penalise if effects are too small
+  — forces graph to learn causal structure, not just correlations
+
+#### `nfn/predictive.py` (upgraded)
+- **`ProbabilisticPredictionHead`**: predicts `N(μ, σ²)` instead of just μ
+  — NLL loss under predicted Gaussian — uncertainty-aware predictions
+- **N-step horizon**: `n_steps_ahead` prediction heads (k=1,2,...,N)
+  — each conditioned on step index via learned embedding
+- **Horizon decay**: `λ^k` weights — shorter horizons trained harder
+- **`multistep_prediction_loss()`**: computes NLL against actual future block outputs
+
+#### `nfn/reasoning.py` (upgraded)
+- **MCTS-lite `PlanExecutor`**: replaces sequential sub-goal execution with UCB1 tree search
+  — `MCTSNode` with visits, value, prior, UCB scoring
+  — `n_simulations=8` rollouts per step, `exploration_c=1.414`
+- **8 sub-goals** (doubled from 4), hierarchical decomposition
+- **Learned sub-goal generation**: MLP conditioned on (step fraction, depth) — non-linear trajectories
+- **`estimate_value()`**: value head for MCTS rollout evaluation
+- **`_mcts_backprop()`**: updates node values based on alignment achieved
+
+#### `nfn/goal.py` (upgraded)
+- **`HierarchicalGoalDecomposer`**: binary tree with `n_levels=3` → 8 leaf sub-goals
+  — `splitter` network generates left/right child goal phases
+  — `get_subgoal()` advances through tree leaves based on alignment
+- **`reward_goal_achievement()`**: returns [B] reward ∈ [0,1] — usable as intrinsic reward
+- **`hierarchy_loss()`**: encourages model to be alignable with any leaf sub-goal
+
+#### `nfn/config.py` (upgraded)
+- 25 new hyperparameters for v5.0 modules (value, intrinsic, ToM, NOTEARS, MCTS, etc.)
+
+#### `training/losses.py` (upgraded)
+- **5 new v5.0 loss signals**: `value`, `intrinsic`, `tom`, `notears`, `counterfactual`
+- **EMA tracking**: `_update_ema()` maintains exponential moving averages per signal
+- **`per_signal_grad_norms()`**: approximate gradient norm attribution by loss magnitude
+- **`get_ema_breakdown()`**: returns smoothed loss history for curriculum decisions
+
+#### `training/agi_trainer.py` (upgraded)
+- **`AdaptiveCurriculumScheduler`** (replaces linear ramp):
+  — detects LM loss stability via relative variance (`< lm_stable_thr`)
+  — three phases: `warmup → ramp → adaptive`
+  — per-signal weight adjustment: progress > threshold → +1%, loss increasing → -0.5%
+- **Offline self-play replay**: `sp_buffer.sample()` now called each self-play step
+  — stored preference pairs replayed with DPO at 0.5× weight
+  — was allocated in v5.0 but never used
+- **ToM training from self-play**: winner/loser hidden states feed `tom.update_beliefs()`
+- **Value + Intrinsic in WAKE step**: integrated when model exposes `_hidden_states`
+- **v5.0 metrics logging**: phase name, val loss, intrinsic total, ToM total, replay DPO
+
+---
+
 ## [5.0.0] — 2026-05-10 — All-in-one app, autonomous learning, TTL adaptation
 
 ### New files

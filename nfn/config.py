@@ -185,6 +185,49 @@ class NFNConfig:
     ssm_d_conv: int = 4                 # depthwise conv kernel size
     ssm_expand: int = 2                 # inner channel expansion factor
 
+    # ── AGI v5.0 — Value Function & Reward Learning ────────────────────────
+    use_value_head: bool = True
+    value_hidden: int = 128             # value MLP hidden dim
+    value_gamma: float = 0.99          # TD discount factor
+    value_beta: float = 0.1            # AWR temperature
+    value_clip: float = 5.0            # advantage clipping
+    lambda_value: float = 0.01         # value loss weight
+
+    # ── AGI v5.0 — Intrinsic Motivation ───────────────────────────────────
+    use_intrinsic: bool = True
+    intrinsic_z_action: int = 64       # action embedding dim for forward model
+    intrinsic_n_clusters: int = 32     # LP tracker clusters
+    intrinsic_hash_dim: int = 32       # novelty hash dimension
+    intrinsic_n_buckets: int = 1024    # novelty hash buckets
+    intrinsic_w_curiosity: float = 0.5
+    intrinsic_w_novelty: float = 0.3
+    intrinsic_w_progress: float = 0.2
+    lambda_intrinsic: float = 0.05     # intrinsic loss weight
+
+    # ── AGI v5.0 — Theory of Mind ──────────────────────────────────────────
+    use_theory_of_mind: bool = True
+    tom_belief_dim: int = 128          # agent belief state dimension
+    tom_n_heads: int = 4               # belief encoder attention heads
+    lambda_tom: float = 0.05           # ToM loss weight
+
+    # ── AGI v5.0 — Causal upgrades ────────────────────────────────────────
+    lambda_notears: float = 0.001      # NOTEARS acyclicity penalty
+    lambda_counterfactual: float = 0.01 # counterfactual consistency loss
+
+    # ── AGI v5.0 — Multi-step Predictive Coding ────────────────────────────
+    pc_n_steps_ahead: int = 3          # how many steps ahead to predict
+    pc_use_learned_prior: bool = True  # use learned prior in free energy
+
+    # ── AGI v5.0 — MCTS Planning ───────────────────────────────────────────
+    use_mcts_planning: bool = True
+    mcts_n_simulations: int = 8        # MCTS rollout simulations
+    mcts_exploration_c: float = 1.414  # UCB exploration constant
+    plan_n_subgoals: int = 8           # increased from 4
+
+    # ── AGI v5.0 — Adaptive Curriculum ────────────────────────────────────
+    curriculum_adaptive: bool = True   # use loss-adaptive curriculum
+    curriculum_window: int = 50        # window for loss trend detection
+
     @property
     def n_motifs(self) -> int:
         return len(self.motifs)
