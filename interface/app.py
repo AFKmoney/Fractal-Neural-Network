@@ -57,6 +57,9 @@ from nfn.agi_model import build_agi_model
 from inference.engine import AGIInferenceEngine
 from training.agi_trainer import AGITrainer
 from interface.agents import ChatAgent, ThinkAgent, ToolAgent, LearnAgent, CodeAgent, ReasoningAgent
+from interface.remote_trainer import RemoteTrainer
+
+_remote_trainer = RemoteTrainer()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -721,11 +724,39 @@ _HTML = """<!DOCTYPE html>
 
   /* Chat area */
   .chat-area { flex: 1; display: flex; flex-direction: column; }
-  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
-  .tab { padding: 10px 20px; font-size: 0.8rem; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); overflow-x: auto; }
+  .tab { padding: 10px 20px; font-size: 0.8rem; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.15s; white-space: nowrap; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
   .tab-content { display: none; flex: 1; flex-direction: column; overflow: hidden; }
   .tab-content.active { display: flex; }
+
+  /* Remote training tab */
+  .remote-panel { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .remote-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .remote-section h2 { font-size: 0.75rem; color: var(--accent2); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+  .form-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .form-row input, .form-row select { flex: 1; min-width: 120px; }
+  .form-col { display: flex; flex-direction: column; gap: 4px; }
+  .form-col label { font-size: 0.72rem; color: var(--muted); }
+  .dtabs { display: flex; gap: 4px; margin-bottom: 8px; }
+  .dtab { padding: 4px 12px; font-size: 0.75rem; border-radius: 4px; cursor: pointer; background: var(--border); color: var(--muted); border: none; font-family: inherit; }
+  .dtab.active { background: var(--accent); color: #fff; }
+  .log-output { flex: 1; background: #0d0d14; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 0.72rem; line-height: 1.5; overflow-y: auto; max-height: 320px; white-space: pre-wrap; word-break: break-all; color: #a0aec0; }
+  .metrics-bar { display: flex; gap: 16px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; font-size: 0.75rem; flex-wrap: wrap; }
+  .metrics-bar span { color: var(--muted); }
+  .metrics-bar span b { color: var(--accent2); }
+  .ckpt-list { display: flex; flex-direction: column; gap: 6px; }
+  .ckpt-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: var(--bg); border-radius: 6px; font-size: 0.78rem; }
+  .ckpt-row button { margin-left: auto; padding: 3px 10px; font-size: 0.72rem; }
+  .hf-result { padding: 6px 10px; background: var(--bg); border-radius: 6px; cursor: pointer; font-size: 0.78rem; display: flex; flex-direction: column; gap: 2px; border: 1px solid transparent; }
+  .hf-result:hover, .hf-result.selected { border-color: var(--accent); }
+  .hf-result .hf-id { color: var(--accent2); font-weight: bold; }
+  .hf-result .hf-desc { color: var(--muted); font-size: 0.7rem; }
+  .conn-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; }
+  .conn-badge.connected { background: #10b98122; color: var(--green); }
+  .conn-badge.disconnected { background: #ef444422; color: var(--red); }
+  .conn-badge.training { background: #7c3aed22; color: var(--accent); }
+  .conn-badge.setting_up { background: #f59e0b22; color: var(--yellow); }
 
   /* Messages */
   .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
@@ -828,6 +859,7 @@ _HTML = """<!DOCTYPE html>
       <div class="tab" onclick="switchTab('think')">🧠 Raisonner</div>
       <div class="tab" onclick="switchTab('memory')">🗂 Mémoire</div>
       <div class="tab" onclick="switchTab('learn')">📥 Apprendre</div>
+      <div class="tab" onclick="switchTab('remote')">🖥 Remote Train</div>
     </div>
 
     <!-- Chat tab -->
@@ -884,6 +916,148 @@ _HTML = """<!DOCTYPE html>
         <div class="stats-grid" id="stats-grid"></div>
       </div>
     </div>
+
+    <!-- Remote Train tab -->
+    <div class="tab-content" id="tab-remote">
+      <div class="remote-panel">
+
+        <!-- 1. Connect -->
+        <div class="remote-section">
+          <h2>1. Connect to GPU &nbsp; <span id="conn-badge" class="conn-badge disconnected">disconnected</span></h2>
+          <div class="form-row">
+            <div class="form-col" style="flex:2">
+              <label>Host / IP</label>
+              <input type="text" id="ssh-host" placeholder="123.45.67.89 or hostname">
+            </div>
+            <div class="form-col" style="flex:0 0 70px">
+              <label>Port</label>
+              <input type="number" id="ssh-port" value="22">
+            </div>
+            <div class="form-col" style="flex:1">
+              <label>Username</label>
+              <input type="text" id="ssh-user" placeholder="root">
+            </div>
+          </div>
+          <div class="form-col">
+            <label>Password (leave empty if using SSH key below)</label>
+            <input type="password" id="ssh-password" placeholder="Password">
+          </div>
+          <div class="form-col">
+            <label>SSH Private Key (paste full key — -----BEGIN ... PRIVATE KEY-----)</label>
+            <textarea id="ssh-key" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----&#10;&#10;Leave empty if using password above" style="font-size:0.7rem;line-height:1.4;resize:vertical"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn" id="connect-btn" onclick="remoteConnect()">🔌 Connect</button>
+            <button class="btn secondary" id="setup-btn" onclick="remoteSetup()" disabled>⚙ Install / Update Repo</button>
+            <span id="connect-msg" style="font-size:0.78rem;color:var(--muted)"></span>
+          </div>
+        </div>
+
+        <!-- 2. Dataset -->
+        <div class="remote-section">
+          <h2>2. Dataset</h2>
+          <div class="dtabs">
+            <button class="dtab active" id="dtab-builtin-btn" onclick="switchDTab('builtin')">Built-in</button>
+            <button class="dtab" id="dtab-hf-btn" onclick="switchDTab('hf')">HuggingFace Search</button>
+            <button class="dtab" id="dtab-hfid-btn" onclick="switchDTab('hfid')">HuggingFace ID</button>
+          </div>
+
+          <div id="dtab-builtin" class="dtab-pane">
+            <select id="builtin-dataset" style="width:100%">
+              <option value="tiny-shakespeare">tiny-shakespeare — 1 MB, Shakespeare (quick test)</option>
+              <option value="gutenberg-top100">gutenberg-top100 — 20 MB, classic books</option>
+              <option value="wikipedia-en-simple" selected>wikipedia-en-simple — 120 MB, recommended</option>
+              <option value="openwebtext-10pct">openwebtext-10pct — 2 GB, web language (needs HF library)</option>
+              <option value="cc-news">cc-news — 1 GB, news articles (needs HF library)</option>
+              <option value="wikipedia-en">wikipedia-en — 20 GB, full English Wikipedia</option>
+              <option value="pile-10pct">pile-10pct — 8 GB, diverse high-quality (needs HF library)</option>
+            </select>
+          </div>
+
+          <div id="dtab-hf" class="dtab-pane" style="display:none">
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <input type="text" id="hf-search-input" placeholder="Search HuggingFace (e.g. wikipedia, openwebtext, bookcorpus)" style="flex:1">
+              <button class="btn secondary" onclick="hfSearch()">Search</button>
+            </div>
+            <div id="hf-results" style="display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto"></div>
+            <div id="hf-selected-display" style="display:none;margin-top:8px;padding:6px 10px;background:var(--bg);border-radius:6px;font-size:0.78rem;color:var(--green)">
+              Selected: <b id="hf-selected-id"></b>
+            </div>
+          </div>
+
+          <div id="dtab-hfid" class="dtab-pane" style="display:none">
+            <div class="form-col">
+              <label>HuggingFace dataset ID (e.g. <code>wikipedia</code>, <code>allenai/c4</code>, <code>bookcorpus</code>)</label>
+              <input type="text" id="hf-direct-id" placeholder="dataset-owner/dataset-name">
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Config -->
+        <div class="remote-section">
+          <h2>3. Training Config</h2>
+          <div class="form-row">
+            <div class="form-col">
+              <label>Model size</label>
+              <select id="rc-config">
+                <option value="nano">nano  — ~3M params,  &lt;1GB VRAM</option>
+                <option value="small" selected>small — ~15M params, ~4GB VRAM</option>
+                <option value="medium">medium — ~85M params, ~12GB VRAM</option>
+                <option value="large">large  — ~350M params, ~40GB VRAM</option>
+              </select>
+            </div>
+            <div class="form-col">
+              <label>Batch size</label>
+              <input type="number" id="rc-batch" value="8" min="1" max="128" style="width:80px">
+            </div>
+            <div class="form-col">
+              <label>Seq length</label>
+              <input type="number" id="rc-seqlen" value="512" min="64" max="4096" step="64" style="width:90px">
+            </div>
+            <div class="form-col">
+              <label>Learning rate</label>
+              <input type="text" id="rc-lr" value="2e-4" style="width:80px">
+            </div>
+            <div class="form-col">
+              <label>Epochs</label>
+              <input type="number" id="rc-epochs" value="3" min="1" max="100" style="width:70px">
+            </div>
+            <div class="form-col">
+              <label>Max chars</label>
+              <input type="number" id="rc-maxchars" value="30000000" min="100000" step="1000000" style="width:120px">
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Controls -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn" id="rt-start-btn" onclick="remoteStart()" disabled style="background:var(--accent)">▶ Start Training</button>
+          <button class="btn secondary" id="rt-stop-btn" onclick="remoteStop()" disabled>⏹ Stop &amp; Save Checkpoint</button>
+          <button class="btn secondary" id="rt-ckpts-btn" onclick="loadCheckpoints()" disabled>📥 List Checkpoints</button>
+          <span id="rt-status" style="font-size:0.75rem;color:var(--muted)"></span>
+        </div>
+
+        <!-- Live metrics -->
+        <div class="metrics-bar" id="rt-metrics" style="display:none">
+          <span>Step <b id="rm-step">—</b></span>
+          <span>LM loss <b id="rm-lm">—</b></span>
+          <span>PPL <b id="rm-ppl">—</b></span>
+          <span>Phase <b id="rm-phase">—</b></span>
+          <span>Grad norm <b id="rm-gn">—</b></span>
+          <span>LR <b id="rm-lr">—</b></span>
+        </div>
+
+        <!-- Log output -->
+        <div class="log-output" id="rt-log">Waiting to connect…</div>
+
+        <!-- Checkpoints -->
+        <div class="remote-section" id="rt-ckpts-section" style="display:none">
+          <h2>Checkpoints</h2>
+          <div class="ckpt-list" id="rt-ckpts-list"></div>
+        </div>
+
+      </div>
+    </div>
   </div>
 </div>
 
@@ -916,12 +1090,221 @@ function connectWS() {
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => { t.classList.remove('active'); t.style.display='none'; });
-  const tabs = ['chat','think','memory','learn'];
+  const tabs = ['chat','think','memory','learn','remote'];
   const idx = tabs.indexOf(name);
   document.querySelectorAll('.tab')[idx].classList.add('active');
   const el = document.getElementById('tab-'+name);
   el.classList.add('active'); el.style.display='flex';
   if (name === 'memory') loadStatus();
+  if (name === 'remote') remoteStatusPoll();
+}
+
+// ── Remote Train ─────────────────────────────────────────────────────────────
+let _remoteWs = null;
+let _hfSelected = '';
+let _datasetMode = 'builtin';
+let _rtLogLines = 0;
+let _rtPollInterval = null;
+
+function switchDTab(name) {
+  ['builtin','hf','hfid'].forEach(n => {
+    document.getElementById('dtab-'+n).style.display = n===name ? '' : 'none';
+    document.getElementById('dtab-'+n+'-btn').classList.toggle('active', n===name);
+  });
+  _datasetMode = name;
+}
+
+function remoteConnect() {
+  const btn = document.getElementById('connect-btn');
+  const msg = document.getElementById('connect-msg');
+  btn.disabled = true; msg.textContent = 'Connecting…';
+  fetch('/api/remote/connect', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      host:     document.getElementById('ssh-host').value.trim(),
+      user:     document.getElementById('ssh-user').value.trim(),
+      port:     parseInt(document.getElementById('ssh-port').value) || 22,
+      password: document.getElementById('ssh-password').value,
+      key_data: document.getElementById('ssh-key').value,
+    })
+  }).then(r=>r.json()).then(d => {
+    btn.disabled = false;
+    if (d.ok) {
+      msg.textContent = `✓ ${d.hostname} — ${d.gpu}`;
+      msg.style.color = 'var(--green)';
+      setBadge('connected');
+      document.getElementById('setup-btn').disabled = false;
+      document.getElementById('rt-start-btn').disabled = false;
+      document.getElementById('rt-ckpts-btn').disabled = false;
+      rtLog('Connected to ' + d.hostname + ' — GPU: ' + d.gpu);
+    } else {
+      msg.textContent = '✗ ' + d.error;
+      msg.style.color = 'var(--red)';
+      setBadge('disconnected');
+    }
+  }).catch(e => { btn.disabled=false; msg.textContent='Error: '+e; msg.style.color='var(--red)'; });
+}
+
+function remoteSetup() {
+  const btn = document.getElementById('setup-btn');
+  btn.disabled = true;
+  setBadge('setting_up');
+  rtLog('Setting up repo on remote machine…');
+  fetch('/api/remote/setup', {method:'POST'})
+    .then(r=>r.json()).then(d => {
+      btn.disabled = false;
+      if (d.ok) {
+        rtLog('✓ Setup complete');
+        setBadge('connected');
+      } else {
+        rtLog('✗ Setup failed: ' + d.error);
+        setBadge('connected');
+      }
+      (d.log||[]).forEach(l => rtLog(l));
+    });
+}
+
+function remoteStart() {
+  const dataset = _datasetMode==='hf' ? '' : (_datasetMode==='hfid' ? '' : document.getElementById('builtin-dataset').value);
+  const hfDataset = _datasetMode==='hf' ? _hfSelected : (_datasetMode==='hfid' ? document.getElementById('hf-direct-id').value.trim() : '');
+  if (_datasetMode!=='builtin' && !hfDataset) { rtLog('⚠ Select or enter a HuggingFace dataset first'); return; }
+
+  document.getElementById('rt-start-btn').disabled = true;
+  document.getElementById('rt-stop-btn').disabled = false;
+  document.getElementById('rt-metrics').style.display = 'flex';
+  setBadge('training');
+  rtLog('Starting training…');
+
+  fetch('/api/remote/start', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      dataset:    dataset,
+      hf_dataset: hfDataset,
+      config:     document.getElementById('rc-config').value,
+      batch:      parseInt(document.getElementById('rc-batch').value),
+      seq_len:    parseInt(document.getElementById('rc-seqlen').value),
+      lr:         parseFloat(document.getElementById('rc-lr').value),
+      epochs:     parseInt(document.getElementById('rc-epochs').value),
+      max_chars:  parseInt(document.getElementById('rc-maxchars').value),
+    })
+  }).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      rtLog('✓ Training started in tmux on remote GPU');
+      remoteOpenWs();
+    } else {
+      rtLog('✗ Start failed: ' + d.error);
+      document.getElementById('rt-start-btn').disabled = false;
+      document.getElementById('rt-stop-btn').disabled = true;
+      setBadge('connected');
+    }
+  });
+}
+
+function remoteStop() {
+  rtLog('Stopping… (saving checkpoint)');
+  document.getElementById('rt-stop-btn').disabled = true;
+  fetch('/api/remote/stop', {method:'POST'}).then(r=>r.json()).then(d => {
+    rtLog(d.ok ? '✓ Stopped — checkpoint saved' : '✗ ' + d.error);
+    document.getElementById('rt-start-btn').disabled = false;
+    setBadge('connected');
+    loadCheckpoints();
+  });
+}
+
+function remoteOpenWs() {
+  if (_remoteWs) _remoteWs.close();
+  const proto = location.protocol==='https:' ? 'wss:' : 'ws:';
+  _remoteWs = new WebSocket(`${proto}//${location.host}/ws/remote`);
+  _remoteWs.onmessage = (e) => {
+    const d = JSON.parse(e.data);
+    (d.lines||[]).forEach(l => rtLog(l));
+    if (d.metrics && d.metrics.step) updateMetrics(d.metrics);
+    if (d.status === 'done') {
+      rtLog('✓ Training complete');
+      document.getElementById('rt-start-btn').disabled = false;
+      document.getElementById('rt-stop-btn').disabled = true;
+      setBadge('connected');
+      loadCheckpoints();
+    }
+  };
+  _remoteWs.onclose = () => {};
+}
+
+function remoteStatusPoll() {
+  fetch('/api/remote/status').then(r=>r.json()).then(d => {
+    setBadge(d.status);
+    if (d.last_metrics && d.last_metrics.step) updateMetrics(d.last_metrics);
+  }).catch(()=>{});
+}
+
+function updateMetrics(m) {
+  if (m.step  !== undefined) document.getElementById('rm-step').textContent  = m.step;
+  if (m.lm    !== undefined) document.getElementById('rm-lm').textContent    = (+m.lm).toFixed(4);
+  if (m.ppl   !== undefined) document.getElementById('rm-ppl').textContent   = (+m.ppl).toFixed(1);
+  if (m.phase !== undefined) document.getElementById('rm-phase').textContent = m.phase;
+  if (m.gn    !== undefined) document.getElementById('rm-gn').textContent    = (+m.gn).toFixed(3);
+  if (m.lr    !== undefined) document.getElementById('rm-lr').textContent    = m.lr;
+  document.getElementById('rt-metrics').style.display = 'flex';
+}
+
+function rtLog(line) {
+  const el = document.getElementById('rt-log');
+  if (el.textContent === 'Waiting to connect…') el.textContent = '';
+  el.textContent += line + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+function setBadge(status) {
+  const b = document.getElementById('conn-badge');
+  b.className = 'conn-badge ' + status;
+  b.textContent = status;
+  document.getElementById('rt-status').textContent = status;
+}
+
+function hfSearch() {
+  const q = document.getElementById('hf-search-input').value.trim();
+  if (!q) return;
+  const res = document.getElementById('hf-results');
+  res.innerHTML = '<span style="color:var(--muted);font-size:0.75rem">Searching…</span>';
+  fetch('/api/hf/search?q=' + encodeURIComponent(q) + '&limit=8')
+    .then(r=>r.json()).then(d => {
+      if (!d.results || !d.results.length) { res.innerHTML = '<span style="color:var(--muted);font-size:0.75rem">No results</span>'; return; }
+      res.innerHTML = '';
+      d.results.forEach(ds => {
+        const div = document.createElement('div');
+        div.className = 'hf-result';
+        div.innerHTML = `<span class="hf-id">${ds.id}</span><span class="hf-desc">${ds.description || ''} · ${(ds.downloads||0).toLocaleString()} downloads</span>`;
+        div.onclick = () => {
+          res.querySelectorAll('.hf-result').forEach(x => x.classList.remove('selected'));
+          div.classList.add('selected');
+          _hfSelected = ds.id;
+          document.getElementById('hf-selected-display').style.display = '';
+          document.getElementById('hf-selected-id').textContent = ds.id;
+        };
+        res.appendChild(div);
+      });
+    });
+}
+
+function loadCheckpoints() {
+  fetch('/api/remote/checkpoints').then(r=>r.json()).then(d => {
+    const sec = document.getElementById('rt-ckpts-section');
+    const list = document.getElementById('rt-ckpts-list');
+    if (!d.checkpoints || !d.checkpoints.length) { list.innerHTML = '<span style="color:var(--muted);font-size:0.78rem">No checkpoints found</span>'; sec.style.display=''; return; }
+    list.innerHTML = '';
+    d.checkpoints.forEach(ck => {
+      const row = document.createElement('div');
+      row.className = 'ckpt-row';
+      row.innerHTML = `<span>${ck.name}</span><span style="color:var(--muted)">${ck.size_mb} MB</span>`;
+      const btn = document.createElement('button');
+      btn.className = 'btn secondary';
+      btn.textContent = '⬇ Download';
+      btn.onclick = () => { btn.textContent='Downloading…'; btn.disabled=true; window.location='/api/remote/download/'+ck.name; setTimeout(()=>{btn.textContent='⬇ Download';btn.disabled=false;},3000); };
+      row.appendChild(btn);
+      list.appendChild(row);
+    });
+    sec.style.display = '';
+  });
 }
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
@@ -1322,3 +1705,116 @@ async def ttl_reset():
         return JSONResponse({"reset": True, **_online_learner.stats()})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Remote Training — SSH + HuggingFace integration
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RemoteConnectRequest(BaseModel):
+    host:     str
+    user:     str
+    port:     int   = 22
+    password: str   = ""
+    key_data: str   = ""
+
+class RemoteStartRequest(BaseModel):
+    dataset:    str   = "wikipedia-en-simple"
+    hf_dataset: str   = ""
+    config:     str   = "small"
+    batch:      int   = 8
+    seq_len:    int   = 512
+    lr:         float = 2e-4
+    epochs:     int   = 3
+    max_chars:  int   = 30_000_000
+
+
+@app.post("/api/remote/connect")
+async def remote_connect(req: RemoteConnectRequest):
+    result = await asyncio.to_thread(
+        _remote_trainer.connect,
+        req.host, req.user, req.port, req.password, req.key_data,
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/remote/setup")
+async def remote_setup():
+    logs: List[str] = []
+    result = await asyncio.to_thread(_remote_trainer.setup, logs.append)
+    return JSONResponse({**result, "log": logs})
+
+
+@app.post("/api/remote/start")
+async def remote_start(req: RemoteStartRequest):
+    result = await asyncio.to_thread(
+        _remote_trainer.start,
+        req.dataset, req.hf_dataset, req.config,
+        req.batch, req.seq_len, req.lr, req.epochs, req.max_chars,
+    )
+    return JSONResponse(result)
+
+
+@app.post("/api/remote/stop")
+async def remote_stop():
+    result = await asyncio.to_thread(_remote_trainer.stop)
+    return JSONResponse(result)
+
+
+@app.get("/api/remote/status")
+async def remote_status():
+    return JSONResponse({
+        "status":       _remote_trainer.status,
+        "gpu":          _remote_trainer.gpu_info,
+        "last_metrics": _remote_trainer.last_metrics,
+    })
+
+
+@app.get("/api/remote/logs")
+async def remote_logs(since: int = 0):
+    return JSONResponse({"lines": _remote_trainer.get_logs(since)})
+
+
+@app.get("/api/remote/checkpoints")
+async def remote_checkpoints():
+    result = await asyncio.to_thread(_remote_trainer.list_checkpoints)
+    return JSONResponse({"checkpoints": result})
+
+
+@app.get("/api/remote/download/{name}")
+async def remote_download(name: str):
+    from fastapi.responses import FileResponse as _FR
+    dest = str(ROOT / "checkpoints" / name)
+    result = await asyncio.to_thread(_remote_trainer.download_checkpoint, name, dest)
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=500)
+    return _FR(dest, filename=name)
+
+
+@app.get("/api/hf/search")
+async def hf_search(q: str = "", limit: int = 8):
+    results = await asyncio.to_thread(RemoteTrainer.search_hf, q, limit)
+    return JSONResponse({"results": results})
+
+
+@app.websocket("/ws/remote")
+async def ws_remote(ws: WebSocket):
+    """Stream remote training logs to the browser in real time."""
+    await ws.accept()
+    sent = 0
+    try:
+        while True:
+            lines = _remote_trainer.get_logs(sent)
+            if lines:
+                await ws.send_json({
+                    "lines":   lines,
+                    "metrics": _remote_trainer.last_metrics,
+                    "status":  _remote_trainer.status,
+                })
+                sent += len(lines)
+            if _remote_trainer.status in ("done", "error", "disconnected"):
+                await ws.send_json({"status": _remote_trainer.status, "lines": [], "metrics": {}})
+                break
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        pass
