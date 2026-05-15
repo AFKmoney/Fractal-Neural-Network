@@ -41,11 +41,64 @@ To get a capable model, you train it on real data with GPU compute.
 
 | Path | Cost | GPU | Time | Best for |
 |------|------|-----|------|----------|
+| [Web UI — Remote Train](#-web-ui-remote-train-easiest) | ~$5–15 | Any cloud GPU | 2–48 h | **Easiest — no terminal needed** |
 | [Kaggle notebook](#-kaggle-free-30-hweek) | **Free** | T4 16 GB | ~12 h | Best free option |
-| [Google Colab](#-google-colab-free-t4) | **Free** | T4 15 GB | ~2 h | Easiest setup |
-| [Lightning.ai](#-lightningai-free-22-hmonth) | **Free** | T4 16 GB | ~12 h | Persistent disk |
-| [Cloud GPU via SSH](#-cloud-gpu-ssh-paid) | ~$5–15 | Any | 2–48 h | Most control |
-| [Local machine](#-local-training) | Your hardware | CPU/GPU | Varies | Development |
+| [Google Colab](#-google-colab-free-t4) | **Free** | T4 15 GB | ~2 h | Easiest free setup |
+| [Lightning.ai](#-lightningai-free-22-hmonth) | **Free** | T4 16 GB | ~12 h | Free + persistent disk |
+| [Cloud GPU via SSH](#-cloud-gpu-ssh-paid) | ~$5–15 | Any | 2–48 h | Full terminal control |
+| [Local machine](#-local-training) | Your hardware | CPU/GPU | Varies | Development / testing |
+
+---
+
+## Web UI — Remote Train (easiest)
+
+The built-in web interface has a **Remote Train** tab — no terminal commands needed.
+Rent any cloud GPU, paste the SSH credentials, pick a dataset, click Start.
+
+```bash
+# Start the interface on your local machine
+python run.py
+# → opens http://127.0.0.1:8000
+```
+
+Then click the **🖥 Remote Train** tab and follow the 4 steps:
+
+**Step 1 — Connect**
+- Paste the GPU's host/IP, username, and either a password or your SSH private key
+- Click **Connect** → shows the GPU name and VRAM
+
+**Step 2 — Install repo** *(first time only)*
+- Click **Install / Update Repo**
+- Automatically clones `AFKmoney/FNN` and runs `pip install -e .` on the remote machine
+
+**Step 3 — Pick a dataset** (3 options)
+- **Built-in** — dropdown with 7 public datasets (Shakespeare → The Pile)
+- **HuggingFace Search** — search live, click a result to select
+- **HuggingFace ID** — paste any dataset ID (`wikipedia`, `allenai/c4`, `bookcorpus`, …)
+
+**Step 4 — Configure & Start**
+- Choose model size (nano / small / medium / large), batch, seq length, LR, epochs
+- Click **▶ Start Training**
+
+Training runs inside `tmux` on the remote GPU — it **survives SSH disconnects**.
+Logs and metrics stream back to your browser in real time:
+
+```
+Step  100 | LM loss 4.21 | PPL  67.8 | Phase ramp    | Grad norm 0.65 | LR 2.8e-04
+Step  500 | LM loss 3.54 | PPL  34.5 | Phase adaptive | Grad norm 0.72 | LR 2.5e-04
+```
+
+When you're done (or want to pause):
+- Click **⏹ Stop & Save Checkpoint** → sends Ctrl-C, model saves automatically
+- Click **List Checkpoints** → one-click download of any `.pt` file to your machine
+
+**Recommended free GPU providers for this workflow:**
+
+| Provider | GPU | VRAM | Price |
+|----------|-----|------|-------|
+| [Vast.ai](https://vast.ai) | RTX 3090 | 24 GB | ~$0.20/h |
+| [RunPod](https://runpod.io) | RTX 4090 | 24 GB | ~$0.44/h |
+| [Lambda Labs](https://lambdalabs.com) | A10 | 24 GB | ~$0.60/h |
 
 ---
 
@@ -289,9 +342,10 @@ python run.py --model checkpoints/agi_nfn_final.pt
 | **Chat** | Token-streaming conversation |
 | **Code** | Code completion and explanation |
 | **Agent** | Multi-step reasoning with tools |
-| **Training** | Start training from the UI, live metrics |
+| **Training** | Start local training from the UI, live metrics |
 | **Explore the Web** | Read a URL → model adapts in real time |
 | **TTL Adaptation** | LoRA adapter controls and stats |
+| **Remote Train** | SSH into any cloud GPU → pick dataset → train → download model |
 
 ---
 
@@ -411,7 +465,8 @@ FNN/
 │
 ├── interface/
 │   ├── app.py                  FastAPI server + WebSocket streaming
-│   └── static/                 Web UI (6 tabs)
+│   ├── remote_trainer.py       SSH remote training manager (paramiko)
+│   └── static/                 Web UI (7 tabs)
 │
 ├── configs/
 │   ├── nano.json               ~3M parameters

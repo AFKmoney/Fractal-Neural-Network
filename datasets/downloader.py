@@ -426,7 +426,7 @@ class DatasetDownloader:
             if text and len(text) > 50:
                 parts.append(text.strip())
                 total += len(text)
-                if max_chars and total >= max_chars * 1.1:
+                if max_chars and total >= max_chars:
                     break
 
         combined = "\n\n".join(parts)
@@ -441,9 +441,17 @@ class DatasetDownloader:
         text:    str,
         val_fraction: float = 0.005,
     ) -> Tuple[str, str]:
-        """Split text into train and validation sets."""
-        split = max(1000, int(len(text) * (1.0 - val_fraction)))
-        return text[:split], text[split:]
+        """Split text into train and validation sets.
+
+        Always reserves at least 1 character per side. For very small corpora,
+        the validation set may shrink below val_fraction × len(text).
+        """
+        n = len(text)
+        if n < 2:
+            return text, ""
+        val_size = max(1, int(n * val_fraction))
+        train_size = max(1, n - val_size)
+        return text[:train_size], text[train_size:]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
