@@ -1818,3 +1818,10 @@ async def ws_remote(ws: WebSocket):
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         pass
+    except Exception:
+        pass
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass

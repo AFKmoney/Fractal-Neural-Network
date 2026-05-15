@@ -272,15 +272,24 @@ def print_training_plan(preset_name: str, preset: dict, hw: dict, batch: int):
     print()
 
 
+_PHASES = ("warmup", "ramp", "adaptive")
+
 def print_live_metrics(m: dict, start_time: float):
     step    = m.get("step", 0)
     lm      = m.get("lm", 0.0)
     agi_w   = m.get("agi_weight", 0.0)
     gn      = m.get("grad_norm", 0.0)
     lr      = m.get("lr", 0.0)
-    phase   = ["warmup", "ramp", "adaptive"][int(m.get("curriculum_phase", 0))]
+    phase_idx = int(m.get("curriculum_phase", 0))
+    phase   = _PHASES[max(0, min(phase_idx, len(_PHASES) - 1))]
     elapsed = time.time() - start_time
-    ppl     = math.exp(min(lm, 20)) if lm > 0 else 0.0
+    if lm <= 0:
+        ppl = 0.0
+    elif lm > 20:
+        # exp(>20) overflows to 1e8+; flag divergence rather than silently clamp
+        ppl = float("inf")
+    else:
+        ppl = math.exp(lm)
 
     extras = []
     if m.get("sp_dpo", 0.0):

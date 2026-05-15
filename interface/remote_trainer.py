@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import shlex
 import threading
 import time
 from pathlib import Path
@@ -34,23 +35,31 @@ LOG_FILE    = f"{REMOTE_DIR}/train_remote.log"
 
 # ── Metric line parser ─────────────────────────────────────────────────────────
 
+_METRIC_PATTERNS = {
+    "step":  re.compile(r"step\s+(\d{1,12})"),
+    "lm":    re.compile(r"\blm\s+([\d.]{1,16})"),
+    "ppl":   re.compile(r"\bppl\s+([\d.]{1,16})"),
+    "agi_w": re.compile(r"\bagi_w\s+([\d.]{1,16})"),
+    "phase": re.compile(r"\[(warmup|ramp|adaptive)\]"),
+    "gn":    re.compile(r"\bgn\s+([\d.]{1,16})"),
+    "lr":    re.compile(r"\blr\s+([\d.eE+\-]{1,16})"),
+}
+
+
 def parse_metrics(line: str) -> Optional[Dict]:
     """Parse: step 100 | lm 4.21 | ppl 67.8 | agi_w 0.12 [ramp] | gn 0.65 | lr 2.8e-04"""
-    patterns = {
-        "step":  r"step\s+(\d+)",
-        "lm":    r"\blm\s+([\d.]+)",
-        "ppl":   r"\bppl\s+([\d.]+)",
-        "agi_w": r"\bagi_w\s+([\d.]+)",
-        "phase": r"\[(warmup|ramp|adaptive)\]",
-        "gn":    r"\bgn\s+([\d.]+)",
-        "lr":    r"\blr\s+([\de.+\-]+)",
-    }
     m: Dict = {}
-    for key, pat in patterns.items():
-        match = re.search(pat, line)
+    for key, pat in _METRIC_PATTERNS.items():
+        match = pat.search(line)
         if match:
             val = match.group(1)
-            m[key] = val if key == "phase" else float(val)
+            if key == "phase":
+                m[key] = val
+            else:
+                try:
+                    m[key] = float(val)
+                except ValueError:
+                    pass
     return m if "step" in m else None
 
 
@@ -110,14 +119,12 @@ class RemoteTrainer:
             self._sftp = client.open_sftp()
             self.status = "connected"
 
-            # Gather GPU info
-            _, out, _ = client.exec_command(
-                "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'No NVIDIA GPU'"
-            )
-            self.gpu_info = out.read().decode().strip().split("\n")[0]
-
-            _, out2, _ = client.exec_command("uname -n")
-            hostname = out2.read().decode().strip()
+            self.gpu_info = self._exec(
+                "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null "
+                "|| echo 'No NVIDIA GPU'",
+                timeout=10,
+            ).split("\n")[0]
+            hostname = self._exec("uname -n", timeout=10)
 
             return {"ok": True, "hostname": hostname, "gpu": self.gpu_info}
 
@@ -130,6 +137,9 @@ class RemoteTrainer:
 
     def disconnect(self):
         self._stop_event.set()
+        if self._stream_thread and self._stream_thread.is_alive():
+            self._stream_thread.join(timeout=5)
+        self._stream_thread = None
         for obj in (self._sftp, self._ssh):
             if obj:
                 try:
@@ -142,6 +152,22 @@ class RemoteTrainer:
         self._stop_event.clear()
 
     # ── Setup ──────────────────────────────────────────────────────────────────
+
+    def _exec(self, cmd: str, timeout: int = 60) -> str:
+        """Run a remote command and return combined stdout+stderr; closes channels."""
+        if not self._ssh:
+            return ""
+        stdin, stdout, stderr = self._ssh.exec_command(cmd, timeout=timeout)
+        try:
+            out = stdout.read().decode(errors="replace").strip()
+            err = stderr.read().decode(errors="replace").strip()
+            return out or err
+        finally:
+            for ch in (stdin, stdout, stderr):
+                try:
+                    ch.close()
+                except Exception:
+                    pass
 
     def setup(self, progress_cb: Callable[[str], None] = None) -> Dict:
         """Clone repo + install deps on remote machine."""
@@ -163,8 +189,7 @@ class RemoteTrainer:
             for msg, cmd in steps:
                 if progress_cb:
                     progress_cb(msg)
-                _, stdout, stderr = self._ssh.exec_command(cmd, timeout=300)
-                out = (stdout.read().decode().strip() or stderr.read().decode().strip())
+                out = self._exec(cmd, timeout=300)
                 if progress_cb and out:
                     progress_cb(out[:300])
 
@@ -203,6 +228,19 @@ class RemoteTrainer:
 
     # ── Training ───────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _validate_config(config: str) -> str:
+        if config not in ("nano", "small", "medium", "large"):
+            raise ValueError(f"config must be one of nano/small/medium/large, got: {config!r}")
+        return config
+
+    @staticmethod
+    def _safe_dataset_id(name: str) -> str:
+        """Allow only alphanumerics, slash, dash, underscore, dot — typical dataset IDs."""
+        if not re.fullmatch(r"[A-Za-z0-9_\-./]{1,128}", name):
+            raise ValueError(f"invalid dataset id: {name!r}")
+        return name
+
     def start(self, dataset: str = "wikipedia-en-simple", hf_dataset: str = "",
               config: str = "small", batch: int = 8, seq_len: int = 512,
               lr: float = 2e-4, epochs: int = 3,
@@ -210,25 +248,45 @@ class RemoteTrainer:
         if not self._ssh:
             return {"ok": False, "error": "Not connected"}
 
-        self.status = "training"
+        # Validate inputs (prevents shell injection — all values land inside an SSH-exec'd shell command)
+        try:
+            config = self._validate_config(config)
+            ds = self._safe_dataset_id(hf_dataset.strip() if hf_dataset else dataset.strip())
+            batch     = max(1, min(int(batch), 1024))
+            seq_len   = max(64, min(int(seq_len), 16384))
+            epochs    = max(1, min(int(epochs), 1000))
+            max_chars = max(1000, min(int(max_chars), 10_000_000_000))
+            lr        = float(lr)
+            if not (1e-7 <= lr <= 1.0):
+                raise ValueError(f"lr out of range: {lr}")
+        except (ValueError, TypeError) as e:
+            return {"ok": False, "error": f"Invalid argument: {e}"}
+
+        # Stop any previous tail thread before starting a new one
+        if self._stream_thread and self._stream_thread.is_alive():
+            self._stop_event.set()
+            self._stream_thread.join(timeout=5)
+        self._stream_thread = None
         self._stop_event.clear()
+
+        self.status = "training"
         with self._log_lock:
             self._log.clear()
         self.last_metrics = {}
 
-        # Build training command
-        dataset_arg = f"--dataset {hf_dataset}" if hf_dataset else f"--dataset {dataset}"
+        # Build training command — inputs are pre-validated, but quote them for defence in depth
+        ckpt_path = f"{REMOTE_DIR}/checkpoints/agi_nfn_latest.pt"
         resume_check = (
-            f"$([ -f {REMOTE_DIR}/checkpoints/agi_nfn_latest.pt ] "
-            f"&& echo '--resume {REMOTE_DIR}/checkpoints/agi_nfn_latest.pt')"
+            f"$([ -f {shlex.quote(ckpt_path)} ] "
+            f"&& echo --resume && echo {shlex.quote(ckpt_path)})"
         )
         train_cmd = (
             f"cd {REMOTE_DIR} && "
-            f"python cloud_train.py {dataset_arg} "
-            f"--config {config} "
+            f"python cloud_train.py --dataset {shlex.quote(ds)} "
+            f"--config {shlex.quote(config)} "
             f"--batch {batch} "
             f"--seq-len {seq_len} "
-            f"--lr {lr} "
+            f"--lr {lr:g} "
             f"--epochs {epochs} "
             f"--max-chars {max_chars} "
             f"--fp16 "
@@ -236,16 +294,17 @@ class RemoteTrainer:
             f"{resume_check}"
         )
 
-        # Clear old log and launch in tmux
+        # Launch inside tmux so it survives SSH drops.
+        # tmux new-session passes its [shell-command] arg to /bin/sh -c, so we just
+        # quote the whole pipeline as a single argument.
+        inner = f"{train_cmd} 2>&1 | tee {LOG_FILE}; echo __DONE__"
         launch = (
             f"rm -f {LOG_FILE}; "
             f"tmux kill-session -t {TMUX_SESSION} 2>/dev/null; "
-            f"tmux new-session -d -s {TMUX_SESSION} "
-            f"\"bash -c '{train_cmd} 2>&1 | tee {LOG_FILE}; echo __DONE__'\""
+            f"tmux new-session -d -s {TMUX_SESSION} {shlex.quote(inner)}"
         )
         try:
-            _, _, stderr = self._ssh.exec_command(launch)
-            err = stderr.read().decode().strip()
+            err = self._exec(launch, timeout=30)
             # tmux kill-session prints to stderr when session doesn't exist — ignore it
             bad = [l for l in err.splitlines() if "kill-session" not in l and l.strip()]
             if bad:
@@ -263,31 +322,33 @@ class RemoteTrainer:
         """Background thread: SSH tail -f the remote log file."""
         if not self._ssh:
             return
+
         # Wait up to 30 s for log file to appear
         for _ in range(30):
             if self._stop_event.is_set():
                 return
-            _, out, _ = self._ssh.exec_command(f"test -f {LOG_FILE} && echo yes")
-            if out.read().decode().strip() == "yes":
+            if self._exec(f"test -f {LOG_FILE} && echo yes", timeout=10) == "yes":
                 break
             time.sleep(1)
 
-        _, stdout, _ = self._ssh.exec_command(f"tail -n 0 -f {LOG_FILE}")
-        stdout.channel.setblocking(False)
+        stdin, stdout, stderr = self._ssh.exec_command(f"tail -n 0 -f {LOG_FILE}")
+        chan = stdout.channel
+        chan.settimeout(0.5)
 
         try:
             buf = ""
             while not self._stop_event.is_set():
                 try:
-                    chunk = stdout.read(4096)
-                    if not chunk:
-                        time.sleep(0.2)
-                        continue
-                    buf += chunk.decode(errors="replace")
+                    chunk = chan.recv(4096)
                 except Exception:
-                    time.sleep(0.2)
+                    if self._stop_event.is_set():
+                        return
                     continue
-
+                if not chunk:
+                    if chan.exit_status_ready():
+                        break
+                    continue
+                buf += chunk.decode(errors="replace")
                 while "\n" in buf:
                     line, buf = buf.split("\n", 1)
                     line = line.rstrip()
@@ -302,19 +363,26 @@ class RemoteTrainer:
         except Exception as e:
             with self._log_lock:
                 self._log.append(f"[log stream error] {e}")
+        finally:
+            for ch in (stdin, stdout, stderr):
+                try:
+                    ch.close()
+                except Exception:
+                    pass
 
     def stop(self) -> Dict:
         """Send Ctrl-C to tmux pane — training saves checkpoint then exits."""
         if not self._ssh:
             return {"ok": False, "error": "Not connected"}
-        self._stop_event.set()
         try:
-            self._ssh.exec_command(f"tmux send-keys -t {TMUX_SESSION} C-c ENTER")
-            time.sleep(3)
-            self.status = "done"
-            return {"ok": True}
+            self._exec(f"tmux send-keys -t {TMUX_SESSION} C-c ENTER", timeout=10)
         except Exception as e:
             return {"ok": False, "error": str(e)}
+        # Wait briefly for the trainer to flush its checkpoint, then signal the tail thread
+        time.sleep(3)
+        self._stop_event.set()
+        self.status = "done"
+        return {"ok": True}
 
     # ── Checkpoints ────────────────────────────────────────────────────────────
 
