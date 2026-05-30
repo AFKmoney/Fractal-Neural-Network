@@ -52,6 +52,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .flash_attn import FlashAttention
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NOTEARS Acyclicity Penalty
@@ -241,6 +243,118 @@ class CausalPropagator(nn.Module):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Nonlinear Causal Propagator  (GNN-style message passing)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class NonlinearCausalPropagator(nn.Module):
+    """
+    Nonlinear SCM message passing: replaces linear A^T · M with learned
+    nonlinear messages. Each edge (i→j) computes:
+    
+      msg_ij = MLP([m_i ‖ m_j ‖ A[i,j]])  ∈ R^d
+      gate_ij = σ(w_gate · [m_i ‖ m_j])    ∈ [0,1]
+    
+    Slot j receives:  Δm_j = Σ_{i→j} gate_ij · msg_ij
+    
+    This enables modelling nonlinear causal mechanisms (X→Y where Y = f(X, noise))
+    rather than only linear ones (Y = a·X + noise).
+    """
+
+    def __init__(self, d_model: int, n_slots: int, msg_hidden: int = 128):
+        super().__init__()
+        self.n_slots = n_slots
+        
+        # Message MLP: takes [m_i, m_j, edge_weight] → message vector
+        self.msg_mlp = nn.Sequential(
+            nn.Linear(d_model * 2 + 1, msg_hidden),
+            nn.SiLU(),
+            nn.Linear(msg_hidden, d_model),
+        )
+        nn.init.zeros_(self.msg_mlp[-1].weight)
+        nn.init.zeros_(self.msg_mlp[-1].bias)
+        
+        # Gating: controls how much each message passes through
+        self.gate_net = nn.Sequential(
+            nn.Linear(d_model * 2, 1),
+            nn.Sigmoid(),
+        )
+        nn.init.constant_(self.gate_net[0].bias, -2.0)
+        
+        self.tril_mask: Optional[torch.Tensor] = None
+
+    def forward(self, slots: torch.Tensor, A: torch.Tensor) -> torch.Tensor:
+        """
+        slots : [B, n_slots, d]
+        A     : [B, n_slots, n_slots]  — A[b,i,j] = causal weight i→j
+        Returns enriched slots [B, n_slots, d].
+        """
+        B, n, d = slots.shape
+        
+        if self.tril_mask is None or self.tril_mask.shape[0] != n:
+            self.tril_mask = torch.tril(torch.ones(n, n, device=slots.device), diagonal=-1)
+        
+        si = slots.unsqueeze(2).expand(B, n, n, d)  # [B, n, n, d] — from
+        sj = slots.unsqueeze(1).expand(B, n, n, d)  # [B, n, n, d] — to
+        
+        A_exp = A.unsqueeze(-1)  # [B, n, n, 1]
+        
+        # Message: MLP([m_i, m_j, A_ij])
+        msg_input = torch.cat([si, sj, A_exp.expand(B, n, n, 1)], dim=-1)
+        msgs = self.msg_mlp(msg_input)  # [B, n, n, d]
+        
+        # Gate: σ(w · [m_i, m_j])
+        gates = self.gate_net(torch.cat([si, sj], dim=-1))  # [B, n, n, 1]
+        
+        # Mask to only pass messages along DAG edges
+        mask = self.tril_mask.unsqueeze(0).unsqueeze(-1)  # [1, n, n, 1]
+        gated_msgs = msgs * gates * mask  # [B, n, n, d]
+        
+        # Aggregate: slot j receives Σ_i gated_msgs[i,j]
+        received = gated_msgs.sum(dim=1)  # [B, n, d]
+        
+        return slots + received * 0.1
+
+    @torch.no_grad()
+    def intervene(
+        self,
+        slots:    torch.Tensor,
+        A:        torch.Tensor,
+        slot_idx: int,
+        value:    torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        do(M_{slot_idx} = value) — hard intervention with nonlinear propagation.
+        Propagates the DELTA through nonlinear messages for downstream slots.
+        """
+        slots_new = slots.clone()
+        old_val = slots_new[:, slot_idx, :]
+        slots_new[:, slot_idx, :] = value
+        delta = value - old_val  # [B, d]
+        
+        # Iterative propagation: recompute messages with updated slots
+        for _ in range(3):  # fixed 3 iterations of nonlinear propagation
+            B, n, d = slots_new.shape
+            si = slots_new.unsqueeze(2).expand(B, n, n, d)
+            sj = slots_new.unsqueeze(1).expand(B, n, n, d)
+            A_exp = A.unsqueeze(-1)
+            
+            msg_input = torch.cat([si, sj, A_exp.expand(B, n, n, 1)], dim=-1)
+            msgs = self.msg_mlp(msg_input)
+            gates = self.gate_net(torch.cat([si, sj], dim=-1))
+            
+            if self.tril_mask is None or self.tril_mask.shape[0] != n:
+                self.tril_mask = torch.tril(torch.ones(n, n, device=slots.device), diagonal=-1)
+            mask = self.tril_mask.unsqueeze(0).unsqueeze(-1)
+            gated_msgs = msgs * gates * mask
+            
+            received = gated_msgs.sum(dim=1)
+            slots_new = slots_new + received * 0.1
+            slots_new[:, slot_idx, :] = value  # re-fix intervened slot
+        
+        return slots_new
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Causal Graph Layer  (full module)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -261,7 +375,8 @@ class CausalGraphLayer(nn.Module):
         d_model:   int,
         n_slots:   int,
         hidden:    int   = 64,
-        sparsity:  float = 0.01,
+        sparsity:       float = 0.01,
+        use_nonlinear:  bool  = False,
     ):
         super().__init__()
         self.n_slots = n_slots
@@ -272,10 +387,11 @@ class CausalGraphLayer(nn.Module):
 
         # Causal components
         self.edge_net   = CausalEdgeNet(d_model, n_slots, hidden, sparsity)
-        self.propagator = CausalPropagator(d_model, n_slots)
+        self.propagator = NonlinearCausalPropagator(d_model, n_slots) if use_nonlinear \
+                          else CausalPropagator(d_model, n_slots)
 
         # Read back into h
-        self.read_attn = nn.MultiheadAttention(d_model, num_heads=4, batch_first=True)
+        self.read_attn = FlashAttention(d_model, n_heads=4)
         self.norm      = nn.LayerNorm(d_model)
 
     def _get_slots(self, h: torch.Tensor) -> torch.Tensor:
@@ -317,7 +433,7 @@ class CausalGraphLayer(nn.Module):
         slots_enriched = self.propagator(slots, A)   # [B, n_slots, d]
 
         # Read causally-enriched information back into h
-        h_out, _ = self.read_attn(h, slots_enriched, slots_enriched)
+        h_out = self.read_attn(h, slots_enriched, slots_enriched)
         h_out = self.norm(h + h_out)
 
         return h_out, loss_dag
@@ -390,5 +506,5 @@ class CausalGraphLayer(nn.Module):
 
         A, _ = self.edge_net(slots)
         slots_intervened = self.propagator.intervene(slots, A, slot_idx, value)
-        h_cf, _ = self.read_attn(h, slots_intervened, slots_intervened)
+        h_cf = self.read_attn(h, slots_intervened, slots_intervened)
         return self.norm(h + h_cf)

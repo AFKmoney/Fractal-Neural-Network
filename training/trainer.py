@@ -174,21 +174,22 @@ class NFNTrainer:
 
     def _enable_gradient_checkpointing(self):
         """Enable activation checkpointing on NFNBlock layers."""
-        from torch.utils.checkpoint import checkpoint
-        from nfn.network import NFNBlock
+        from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
         for module in self.model.modules():
-            if isinstance(module, NFNBlock):
-                original_forward = module.forward.__func__ if hasattr(module.forward, '__func__') else None
-                break
-        # Apply via model-level flag — NFNBlock checks this in forward
-        if hasattr(self.model, 'gradient_checkpointing'):
-            self.model.gradient_checkpointing = True
-        else:
-            # Monkey-patch: wrap each NFNBlock's forward with checkpoint
-            for module in self.model.modules():
-                if module.__class__.__name__ == "NFNBlock":
-                    module._use_checkpointing = True
+            if module.__class__.__name__ == "NFNBlock":
+                original_forward = module.forward
+
+                def _make_checkpointed(orig, mod):
+                    def _forward(*args, **kwargs):
+                        return torch_checkpoint(
+                            orig, *args,
+                            use_reentrant=False,
+                            **kwargs,
+                        )
+                    return _forward
+
+                module.forward = _make_checkpointed(original_forward, module).__get__(module, type(module))
 
     # ── Checkpoint I/O ────────────────────────────────────────────────────────
 

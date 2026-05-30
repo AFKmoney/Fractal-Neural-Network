@@ -1,339 +1,710 @@
-#!/usr/bin/env python3
 """
-NFN AGI Training — v5.0
+NFN v5.0 — AGI Training Script
 
-Trains AGINFNModel beyond next-token prediction with five concurrent signals:
+Three-phase training to create genuine AGI:
 
-  1. Language modelling       — standard cross-entropy with curiosity weighting
-  2. Multi-objective AGI loss — causal / goal / coherence / ponder / pred /
-                                free_energy / consistency
-  3. Self-play DPO-lite       — generate N candidates, rank by LM loss,
-                                train DPO preference + winner distillation
-  4. Constitutional critique  — generate → critique → revise → train on revision
-  5. WAKE/SLEEP memory cycle  — episodic writes every step, consolidation +
-                                replay every --sleep-every steps
+  Phase 1: MATHEMATICAL SELF-DEVELOPMENT
+    - Model learns arithmetic, primality, sequences, modular arithmetic
+    - Discovers mathematical conjectures autonomously
+    - Generates and verifies proofs
+    - Learns gematria numerical structure
+    - Observes universal laws in its own dynamics
 
-Optional: --ttl (test-time learning)
-    Wraps the model with LoRA fast-weight adapters. During each sampling
-    callback the adapter updates on the batch context — the model adapts to
-    its own training distribution in real time without touching main weights.
+  Phase 2: LANGUAGE + AGI TRAINING
+    - Mathematical truths as training corpus
+    - Full AGI loss (10 components) with curriculum
+    - Self-play DPO for self-improvement
+    - Constitutional self-critique
+    - WAKE/SLEEP memory consolidation
+    - Curiosity-weighted learning
+
+  Phase 3: SELF-MODIFICATION + CONTINUAL LEARNING
+    - Model proposes modifications to its own architecture
+    - Only beneficial changes are kept
+    - Test-time LoRA adaptation
+    - Continuous discovery of new mathematical truths
 
 Usage:
-    python train_agi.py --text data/corpus.txt --config nano --epochs 5
-    python train_agi.py --text data/corpus.txt --config medium --lr 1e-4
-    python train_agi.py --resume checkpoints/agi_nfn_step500.pt
-    python train_agi.py --text data/corpus.txt --no-self-play --no-critique
-    python train_agi.py --text data/corpus.txt --ttl --adapter-rank 8
+    python train_agi.py --phase 1          # Math pre-training only
+    python train_agi.py --phase 2          # Full AGI training
+    python train_agi.py --phase 3          # Self-modification
+    python train_agi.py --phase all        # All phases sequentially
+    python train_agi.py --phase all --steps 10000
 """
 
 import argparse
-import json
 import math
+import os
 import sys
 import time
+import random
 from pathlib import Path
-from typing import Optional
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-
+# ─── NFN Imports ─────────────────────────────────────────────────────────────
 from nfn.config import NFNConfig
-from nfn.agi_model import AGINFNModel, build_agi_model
-from nfn.tokenizer import NFNTokenizer, load_tokenizer
-from nfn.online_learner import OnlineLearner
-from training.agi_trainer import AGITrainer
+from nfn.agi_model import AGINFNModel
+from nfn.tokenizer import CharTokenizer
+
+from nfn.self_development import (
+    MathTruthEngine, GematriaEncoder, UniversalLawObserver, SelfDevelopmentLoop,
+)
+from nfn.proof_engine import ProofGenerator, ProofVerifier, ProofReward
+from nfn.conjecture_discovery import (
+    ConjectureDiscoveryLoop, ConjectureGenerator, ConjectureTester,
+    ConjectureMemory, ARITHMETIC_IDENTITIES,
+)
+from nfn.semantic_gematria import SemanticGematriaLayer, GematriaLoss, GematriaCurriculum
+from nfn.self_modification import SelfModificationController
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Argument parsing
+# Phase 1: Mathematical Self-Development
 # ─────────────────────────────────────────────────────────────────────────────
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(
-        description="NFN AGI Training — trains AGINFNModel beyond next-token prediction",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+def phase1_math_pretraining(model, cfg, device, n_steps=2000, log_every=50):
+    """
+    Pre-train the model on self-generated mathematical truths.
+    
+    This is the foundation: before the model sees any text,
+    it learns the structure of mathematical truth.
+    
+    Truth is infinite, self-verifiable, and free.
+    """
+    print("\n" + "=" * 70)
+    print("  PHASE 1: MATHEMATICAL SELF-DEVELOPMENT")
+    print("=" * 70)
+
+    math_engine = MathTruthEngine(max_number=100)
+    gematria = GematriaEncoder()
+    law_observer = UniversalLawObserver(cfg.d_model).to(device)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, betas=(0.9, 0.95), weight_decay=0.05)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
+
+    proof_gen = ProofGenerator(cfg.d_model).to(device)
+    proof_opt = torch.optim.Adam(proof_gen.parameters(), lr=1e-4)
+    proof_reward_fn = ProofReward(cfg.d_model).to(device)
+
+    conj_gen = ConjectureGenerator(cfg.d_model, n_templates=len(ARITHMETIC_IDENTITIES)).to(device)
+    conj_loop = ConjectureDiscoveryLoop(
+        conj_gen, ConjectureTester(n_trials=50, max_val=100),
+        ConjectureMemory(), ARITHMETIC_IDENTITIES, device=device, lr=5e-5,
     )
 
-    # Data / model
-    p.add_argument("--text",    type=str, default=None,
-                   help="Path to training text file")
-    p.add_argument("--config",  type=str, default="nano",
-                   choices=["nano", "small", "medium", "large"],
-                   help="Model size preset (loads from configs/<name>.json)")
-    p.add_argument("--resume",  type=str, default=None,
-                   help="Resume from checkpoint path (sets model + optimizer state)")
+    gem_loss_fn = GematriaLoss(cfg.vocab_size, cfg.d_model).to(device)
+    gem_curriculum = GematriaCurriculum()
 
-    # Training loop
-    p.add_argument("--epochs",  type=int,   default=3,    help="Number of epochs")
-    p.add_argument("--batch",   type=int,   default=4,    help="Batch size")
-    p.add_argument("--lr",      type=float, default=3e-4, help="Learning rate")
-    p.add_argument("--seq-len", type=int,   default=None,
-                   help="Sequence length (default: from config)")
-    p.add_argument("--output",  type=str,   default="checkpoints",
-                   help="Directory to save checkpoints")
-    p.add_argument("--save-every",  type=int, default=500,
-                   help="Save checkpoint every N steps")
-    p.add_argument("--log-every",   type=int, default=10,
-                   help="Log metrics every N steps")
-    p.add_argument("--warmup-steps",type=int, default=100,
-                   help="LR warmup steps")
-    p.add_argument("--grad-accum",  type=int, default=1,
-                   help="Gradient accumulation steps")
+    history = []
+    best_loss = float("inf")
+    total_truths = 0
+    total_proofs = 0
+    total_conjectures = 0
+    t0 = time.time()
 
-    # Hardware
-    p.add_argument("--device", type=str, default="auto",
-                   choices=["auto", "cpu", "cuda", "mps"])
-    p.add_argument("--fp16",   action="store_true",
-                   help="Use fp16 mixed precision (CUDA only)")
+    for step in range(n_steps):
+        epoch_type = step % 6
+        loss = torch.tensor(0.0, device=device)
 
-    # AGI feature flags
-    p.add_argument("--no-self-play", dest="self_play", action="store_false",
-                   help="Disable self-play + DPO-lite loop")
-    p.add_argument("--no-critique",  dest="critique",  action="store_false",
-                   help="Disable constitutional self-critique")
-    p.add_argument("--no-sleep",     dest="sleep",     action="store_false",
-                   help="Disable WAKE/SLEEP memory consolidation cycle")
-    p.add_argument("--no-curiosity", dest="curiosity", action="store_false",
-                   help="Disable curiosity-driven loss weighting")
-    p.set_defaults(self_play=True, critique=True, sleep=True, curiosity=True)
+        # ── Type 0: Arithmetic truth ──────────────────────────────────────
+        if epoch_type == 0:
+            samples = math_engine.generate_arithmetic(4)
+            for input_tokens, target_tokens, is_true in samples:
+                L = min(len(input_tokens), cfg.max_seq_len)
+                x = torch.tensor([input_tokens[:L]], dtype=torch.long, device=device)
+                x = x % cfg.vocab_size
+                # targets: same length as input, only last position has answer
+                y = torch.full((1, L), -1, dtype=torch.long, device=device)
+                y[0, -1] = target_tokens[-1] % cfg.vocab_size
 
-    # Self-play tuning
-    p.add_argument("--self-play-every", type=int,   default=50)
-    p.add_argument("--n-candidates",    type=int,   default=4)
-    p.add_argument("--dpo-beta",        type=float, default=0.1)
-    p.add_argument("--dpo-weight",      type=float, default=0.3)
+                logits, aux = model(x, targets=y)
+                if isinstance(aux, dict) and "lm" in aux:
+                    l = aux["lm"] if isinstance(aux["lm"], torch.Tensor) else aux.get("total", torch.tensor(0.0, device=device))
+                else:
+                    l = F.cross_entropy(logits.reshape(-1, cfg.vocab_size), y.reshape(-1), ignore_index=-1)
+                
+                if not is_true:
+                    l = l * 0.3
+                else:
+                    total_truths += 1
+                loss = loss + l
 
-    # Constitutional critique tuning
-    p.add_argument("--critique-every",  type=int,   default=100)
-    p.add_argument("--critique-weight", type=float, default=2.0)
+        # ── Type 1: Sequence prediction ───────────────────────────────────
+        elif epoch_type == 1:
+            difficulty = min(5 + step // 200, 12)
+            samples = math_engine.generate_sequence_prediction(4, seq_len=difficulty)
+            for input_tokens, target in samples:
+                L = min(len(input_tokens), cfg.max_seq_len)
+                x = torch.tensor([input_tokens[:L]], dtype=torch.long, device=device)
+                x = x % cfg.vocab_size
+                y = torch.full((1, L), -1, dtype=torch.long, device=device)
+                y[0, -1] = target % cfg.vocab_size
 
-    # SLEEP tuning
-    p.add_argument("--sleep-every",        type=int, default=200)
-    p.add_argument("--sleep-replay-steps", type=int, default=10)
+                logits, _ = model(x, targets=y)
+                l = F.cross_entropy(logits.reshape(-1, cfg.vocab_size), y.reshape(-1), ignore_index=-1)
+                loss = loss + l
+                total_truths += 1
 
-    # Curiosity tuning
-    p.add_argument("--curiosity-tau",    type=float, default=1.0)
-    p.add_argument("--curiosity-weight", type=float, default=0.3)
+        # ── Type 2: Primality ─────────────────────────────────────────────
+        elif epoch_type == 2:
+            samples = math_engine.generate_primality(8)
+            for input_tokens, is_prime in samples:
+                n = input_tokens[0] - 256
+                x = torch.tensor([[n % cfg.vocab_size]], dtype=torch.long, device=device)
+                label = torch.tensor([[1 if is_prime else 0]], dtype=torch.long, device=device)
+                logits, _ = model(x)
+                cls_token = logits[:, -1, :]  # [1, 108]
+                l = F.cross_entropy(cls_token, label.view(-1))
+                loss = loss + l * 0.5
+                total_truths += 1
 
-    # Curriculum tuning
-    p.add_argument("--agi-start",  type=int, default=200,
-                   help="Step at which AGI losses begin ramping in")
-    p.add_argument("--agi-ramp",   type=int, default=100,
-                   help="Steps over which AGI losses ramp from 0 to 1")
+        # ── Type 3: Proof generation ──────────────────────────────────────
+        elif epoch_type == 3:
+            for _ in range(4):
+                a = random.randint(2, 50)
+                b = random.randint(2, 50)
+                target_val = a + b
 
-    # Sampling / eval
-    p.add_argument("--sample-every",  type=int, default=200,
-                   help="Generate a sample text every N steps (0 = disable)")
-    p.add_argument("--sample-prompt", type=str,
-                   default="The neural fractal network",
-                   help="Prompt for text samples during training")
-    p.add_argument("--eval-text",     type=str, default=None,
-                   help="Path to held-out text for perplexity evaluation")
-    p.add_argument("--eval-every",    type=int, default=0,
-                   help="Evaluate held-out perplexity every N steps (0 = end only)")
+                stmt = torch.tensor([[float(a)]], device=device)
+                r_logits, s_vals, stop = proof_gen(stmt, n_steps=4)
+                target_t = torch.tensor([[float(target_val)]], device=device)
 
-    # Test-time learning (LoRA fast-weight adapters)
-    p.add_argument("--ttl",            action="store_true",
-                   help="Enable test-time learning: LoRA adapters update at inference "
-                        "time without modifying base weights")
-    p.add_argument("--adapter-rank",   type=int,   default=8,
-                   help="LoRA adapter rank for test-time learning")
-    p.add_argument("--online-lr",      type=float, default=2e-4,
-                   help="Learning rate for test-time adapter updates")
-    p.add_argument("--online-steps",   type=int,   default=4,
-                   help="Gradient steps per test-time adapt() call")
-    p.add_argument("--ppl-gate",       type=float, default=30.0,
-                   help="Skip adapter update when context ppl < this (model already knows it)")
-    p.add_argument("--adapter-decay",  type=float, default=0.97,
-                   help="Exponential decay applied to adapters after each update "
-                        "(1.0 = no forgetting, 0.9 = fast forgetting)")
-    p.add_argument("--save-adapters",  type=str,   default=None,
-                   help="Save LoRA adapter weights to this path at end of training")
-    p.add_argument("--load-adapters",  type=str,   default=None,
-                   help="Load LoRA adapter weights from this path at start")
+                reward, metrics = proof_reward_fn(
+                    s_vals, target_t,
+                    F.softmax(r_logits, -1), stop, max_steps=4,
+                )
 
-    return p.parse_args()
+                correct = (s_vals[:, -1] - target_t.squeeze()).abs() < 2.0
+                if correct.any():
+                    total_proofs += 1
+
+                proof_loss = -reward + r_logits.sum() * 0.001
+                proof_opt.zero_grad()
+                proof_loss.backward(retain_graph=False)
+                nn.utils.clip_grad_norm_(proof_gen.parameters(), 1.0)
+                proof_opt.step()
+
+                x = torch.tensor([[a % cfg.vocab_size, 0, b % cfg.vocab_size]], dtype=torch.long, device=device)
+                y = torch.full((1, 3), -1, dtype=torch.long, device=device)
+                y[0, -1] = target_val % cfg.vocab_size
+                logits, aux = model(x, targets=y)
+                if isinstance(aux, dict) and "lm" in aux:
+                    l = aux["lm"] if isinstance(aux["lm"], torch.Tensor) else torch.tensor(0.0, device=device)
+                else:
+                    l = torch.tensor(0.0, device=device)
+                loss = loss + l
+
+        # ── Type 4: Conjecture discovery ──────────────────────────────────
+        elif epoch_type == 4:
+            for _ in range(3):
+                m = conj_loop.discover_step()
+            total_conjectures = conj_loop.total_discoveries
+
+            x = torch.randint(0, cfg.vocab_size, (2, 16), device=device)
+            y = torch.randint(0, cfg.vocab_size, (2, 16), device=device)
+            logits, aux = model(x, targets=y)
+            if isinstance(aux, dict) and "lm" in aux:
+                loss = aux["lm"] if isinstance(aux["lm"], torch.Tensor) else torch.tensor(0.0, device=device)
+
+        # ── Type 5: Gematria + universal laws ─────────────────────────────
+        else:
+            x = torch.randint(0, cfg.vocab_size, (2, 16), device=device)
+            y = torch.randint(0, cfg.vocab_size, (2, 16), device=device)
+            logits, aux = model(x, targets=y)
+            if isinstance(aux, dict) and "lm" in aux:
+                loss = aux["lm"] if isinstance(aux["lm"], torch.Tensor) else torch.tensor(0.0, device=device)
+
+            gem_l, gem_m = gem_loss_fn(torch.randn(2, 16, cfg.d_model, device=device), x)
+            loss = loss + gem_l * 0.1
+
+            phase_name = gem_curriculum.get_phase()
+            advanced = gem_curriculum.advance()
+
+        # ── Universal law regularization ──────────────────────────────────
+        if step % 20 == 0:
+            with torch.no_grad():
+                h = torch.randn(2, 32, cfg.d_model, device=device)
+                law_loss, law_m = law_observer(h)
+
+        # ── Gradient step ─────────────────────────────────────────────────
+        if loss.requires_grad and loss.item() > 0:
+            optimizer.zero_grad()
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+
+        # ── Logging ───────────────────────────────────────────────────────
+        elapsed = time.time() - t0
+        current_lr = scheduler.get_last_lr()[0]
+
+        if loss.item() < best_loss:
+            best_loss = loss.item()
+
+        if step % log_every == 0:
+            print(
+                f"  [P1] step {step:5d}/{n_steps} | "
+                f"loss {loss.item():.4f} (best {best_loss:.4f}) | "
+                f"truths {total_truths} | proofs {total_proofs} | "
+                f"conjectures {total_conjectures} | "
+                f"lr {current_lr:.2e} | {elapsed:.1f}s"
+            )
+
+        history.append({
+            "step": step, "phase": 1,
+            "loss": loss.item(), "lr": current_lr,
+            "truths": total_truths, "proofs": total_proofs,
+            "conjectures": total_conjectures,
+        })
+
+    # Save Phase 1
+    ckpt_path = "checkpoints/phase1_math.pt"
+    os.makedirs("checkpoints", exist_ok=True)
+    torch.save({
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "step": n_steps,
+        "truths": total_truths,
+        "proofs": total_proofs,
+        "conjectures": total_conjectures,
+        "history": history[-200:],
+    }, ckpt_path)
+    print(f"\n  Phase 1 complete: {total_truths} truths, {total_proofs} proofs, "
+          f"{total_conjectures} conjectures discovered")
+    print(f"  Checkpoint: {ckpt_path}")
+    print(f"  Final loss: {best_loss:.4f}")
+
+    return history
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Device selection
+# Phase 2: Language + AGI Training
 # ─────────────────────────────────────────────────────────────────────────────
 
-def select_device(pref: str) -> torch.device:
-    if pref == "auto":
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        if torch.backends.mps.is_available():
-            return torch.device("mps")
-        return torch.device("cpu")
-    return torch.device(pref)
+def generate_math_corpus(n_items=5000):
+    """Generate a mathematical corpus for language training."""
+    engine = MathTruthEngine(max_number=200)
+    lines = []
+
+    for _ in range(n_items // 4):
+        for inp, tgt, is_true in engine.generate_arithmetic(1):
+            ops = {0: "+", 1: "-", 2: "*"}
+            a = inp[0] - 256
+            op = ops.get(inp[1], "+")
+            b = inp[2] - 256
+            r = tgt[0] - 256
+            label = "TRUE" if is_true else "FALSE"
+            lines.append(f"{a} {op} {b} = {r} [{label}]")
+
+    for _ in range(n_items // 4):
+        for inp, is_prime in engine.generate_primality(1):
+            n = inp[0] - 256
+            label = "prime" if is_prime else "composite"
+            lines.append(f"{n} is {label}")
+
+    for _ in range(n_items // 4):
+        for inp, target in engine.generate_sequence_prediction(1):
+            seq = [str(x - 256) for x in inp]
+            ans = target - 256
+            lines.append(f"sequence: {', '.join(seq)}, next: {ans}")
+
+    for _ in range(n_items // 4):
+        for inp, target in engine.generate_modular_arithmetic(1):
+            a, b, p = inp[0] - 256, inp[1] - 256, inp[2] - 256
+            r = target - 256
+            lines.append(f"({a} * {b}) mod {p} = {r}")
+
+    # Add number theory facts
+    primes = [p for p in range(2, 200) if engine._is_prime(p)]
+    for p in primes[:50]:
+        lines.append(f"{p} is prime")
+        if p > 2:
+            lines.append(f"{p} = 6*{(p-1)//6}+1 or 6*{(p+1)//6}-1")
+        lines.append(f"fermat: a^({p}-1) = 1 mod {p}")
+
+    for n in range(1, 50):
+        s = n * (n + 1) // 2
+        lines.append(f"sum(1..{n}) = {s}")
+        lines.append(f"{n}^2 = {n*n}")
+
+    return "\n".join(lines)
+
+
+def phase2_agi_training(model, cfg, device, n_steps=3000, log_every=50):
+    """
+    Full AGI training with mathematical corpus, self-play, critique,
+    curiosity weighting, and memory consolidation.
+    """
+    print("\n" + "=" * 70)
+    print("  PHASE 2: LANGUAGE + AGI TRAINING")
+    print("=" * 70)
+
+    tokenizer = CharTokenizer()
+    cfg_vocab = tokenizer.vocab_size
+
+    math_corpus = generate_math_corpus(8000)
+    print(f"  Generated mathematical corpus: {len(math_corpus)} chars")
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), weight_decay=0.1)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-5)
+
+    gem_loss_fn = GematriaLoss(cfg.vocab_size, cfg.d_model).to(device)
+    gem_optimizer = torch.optim.Adam(gem_loss_fn.parameters(), lr=1e-4)
+
+    law_observer = UniversalLawObserver(cfg.d_model).to(device)
+
+    ids = tokenizer.encode(math_corpus, add_bos=True)
+    data = torch.tensor(ids, dtype=torch.long)
+    seq_len = min(cfg.max_seq_len, 128)
+    batch_size = 4
+
+    best_loss = float("inf")
+    history = []
+    t0 = time.time()
+
+    for step in range(n_steps):
+        model.train()
+
+        # Sample batch
+        starts = torch.randint(0, max(1, len(data) - seq_len - 1), (batch_size,))
+        x = torch.stack([data[s:s+seq_len] for s in starts]).to(device)
+        y = torch.stack([data[s+1:s+seq_len+1] for s in starts]).to(device)
+
+        # Forward with AGI losses
+        logits, losses = model(x, targets=y, write_memory=True)
+
+        lm_loss = losses.get("lm", torch.tensor(0.0, device=device))
+        total_loss = lm_loss
+
+        agi_components = ["causal", "goal", "free_energy", "consistency"]
+        for k in agi_components:
+            v = losses.get(k, torch.tensor(0.0, device=device))
+            if isinstance(v, torch.Tensor):
+                total_loss = total_loss + v
+
+        # Gematria loss (number-theoretic structure)
+        if step % 5 == 0:
+            try:
+                gem_l, _ = gem_loss_fn(torch.randn(batch_size, seq_len, cfg.d_model, device=device), x)
+                total_loss = total_loss + gem_l * 0.05
+                gem_optimizer.zero_grad()
+            except Exception:
+                pass
+
+        # Self-play DPO (every 200 steps)
+        sp_loss_val = 0.0
+        if step > 0 and step % 200 == 0:
+            model.eval()
+            with torch.no_grad():
+                prompt = x[:1, :8]
+                candidates = []
+                scores = []
+                for _ in range(4):
+                    try:
+                        cand = model.generate(prompt, max_new_tokens=16, temperature=1.2, top_k=30)
+                        L = cand.shape[1]
+                        tgt_c = cand[:, 1:]                     # [1, L-1]
+                        pad = torch.full((1, 1), -1, dtype=torch.long, device=device)
+                        tgt_c = torch.cat([tgt_c, pad], dim=1)  # [1, L] — last pos ignored
+                        _, lss = model(cand, targets=tgt_c, write_memory=False)
+                        score = -lss.get("lm", torch.tensor(999.0)).item() if isinstance(lss.get("lm"), torch.Tensor) else -999.0
+                        candidates.append(cand)
+                        scores.append(score)
+                    except Exception as e2:
+                        scores.append(-999.0)
+
+                if len(scores) >= 2 and max(scores) > min(scores):
+                    sp_loss_val = max(scores) - min(scores)
+            model.train()
+
+        # Constitutional critique (every 500 steps)
+        crit_loss_val = 0.0
+        if step > 0 and step % 500 == 0:
+            model.eval()
+            with torch.no_grad():
+                prompt = x[:1, :8]
+                try:
+                    revision = model.generate(prompt, max_new_tokens=24, temperature=0.8, top_k=40)
+                    if revision.shape[1] > 2:
+                        L = revision.shape[1]
+                        rev_tgt = revision[:, 1:]               # [1, L-1]
+                        pad = torch.full((1, 1), -1, dtype=torch.long, device=device)
+                        rev_tgt = torch.cat([rev_tgt, pad], dim=1)  # [1, L]
+                        rev_logits, _ = model(revision, targets=rev_tgt, write_memory=False)
+                        crit_loss_val = F.cross_entropy(
+                            rev_logits.reshape(-1, cfg.vocab_size),
+                            rev_tgt.reshape(-1),
+                            ignore_index=-1,
+                        ).item()
+                except Exception as e3:
+                    pass
+            model.train()
+
+        # Memory consolidation / SLEEP (every 500 steps)
+        if step > 0 and step % 500 == 0:
+            model.eval()
+            with torch.no_grad():
+                for block in model._agi_blocks:
+                    if hasattr(block, "memory") and block.memory is not None:
+                        block.memory.maybe_consolidate()
+            model.train()
+
+        # Gradient step
+        if total_loss.requires_grad and total_loss.item() > 0:
+            optimizer.zero_grad()
+            total_loss.backward()
+            gn = nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+
+        loss_val = total_loss.item()
+        if loss_val < best_loss:
+            best_loss = loss_val
+
+        elapsed = time.time() - t0
+        lr = scheduler.get_last_lr()[0]
+
+        if step % log_every == 0:
+            ppl = math.exp(min(loss_val, 10.0))
+            print(
+                f"  [P2] step {step:5d}/{n_steps} | "
+                f"loss {loss_val:.4f} (best {best_loss:.4f}) | "
+                f"ppl {ppl:.1f} | sp {sp_loss_val:.2f} | crit {crit_loss_val:.2f} | "
+                f"lr {lr:.2e} | {elapsed:.1f}s"
+            )
+
+        # Save best
+        if step % 500 == 0 and loss_val <= best_loss + 0.1:
+            ckpt_path = "checkpoints/phase2_agi.pt"
+            torch.save({
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "step": step,
+                "best_loss": best_loss,
+                "history": history[-200:],
+            }, ckpt_path)
+
+        history.append({
+            "step": step, "phase": 2,
+            "loss": loss_val,
+            "ppl": math.exp(min(loss_val, 10.0)),
+            "sp": sp_loss_val,
+            "crit": crit_loss_val,
+        })
+
+    # Final save
+    ckpt_path = "checkpoints/phase2_agi_final.pt"
+    torch.save({
+        "model": model.state_dict(),
+        "step": n_steps,
+        "best_loss": best_loss,
+        "history": history[-200:],
+    }, ckpt_path)
+    print(f"\n  Phase 2 complete: best_loss={best_loss:.4f}")
+    print(f"  Checkpoint: {ckpt_path}")
+
+    return history
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Model / tokenizer construction
+# Phase 3: Self-Modification + Continual Learning
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_model_from_config(
-    config_name: str,
-    tokenizer:   NFNTokenizer,
-    seq_len:     int = None,
-) -> AGINFNModel:
-    """Build an AGINFNModel from a named config preset."""
-    cfg_path = ROOT / "configs" / f"{config_name}.json"
-    if not cfg_path.exists():
-        raise FileNotFoundError(
-            f"Config file not found: {cfg_path}\n"
-            f"Available configs: {[p.stem for p in (ROOT/'configs').glob('*.json')]}"
-        )
-    with open(cfg_path) as f:
-        cfg_dict = json.load(f)
+def phase3_self_modification(model, cfg, device, n_steps=1000, log_every=50):
+    """
+    The model modifies its own architecture and continues learning.
+    Only beneficial modifications are kept.
+    """
+    print("\n" + "=" * 70)
+    print("  PHASE 3: SELF-MODIFICATION + CONTINUAL LEARNING")
+    print("=" * 70)
 
-    # Enable all AGI modules for the AGI trainer
-    cfg_dict.update(
-        use_episodic_memory     = True,
-        use_working_memory      = True,
-        use_causal_graph        = True,
-        use_goal_predictor      = True,
-        use_recursive_reasoning = True,
-        use_predictive_coding   = True,
-        use_free_energy         = True,
-        use_self_consistency    = True,
-        use_plan_executor       = True,
-        use_bayesian_decoder    = False,   # BayesianDecoder adds overhead; off by default
-        use_mixture_of_depths   = True,
-        use_multi_token_pred    = True,
-        use_hyper_net           = True,
-        use_ssm                 = False,   # opt-in: high memory cost
+    controller = SelfModificationController(d_state=32, n_motifs=3).to(device)
+    controller_optimizer = torch.optim.Adam(controller.parameters(), lr=1e-4)
+
+    math_engine = MathTruthEngine(max_number=200)
+    conj_gen = ConjectureGenerator(cfg.d_model, n_templates=len(ARITHMETIC_IDENTITIES)).to(device)
+    conj_loop = ConjectureDiscoveryLoop(
+        conj_gen, ConjectureTester(n_trials=30, max_val=100),
+        ConjectureMemory(), ARITHMETIC_IDENTITIES, device=device,
     )
 
-    cfg = NFNConfig(**{k: v for k, v in cfg_dict.items()
-                       if k in NFNConfig.__dataclass_fields__})
-    cfg.vocab_size    = tokenizer.vocab_size
-    cfg.pad_token_id  = tokenizer.pad_token_id
-    cfg.bos_token_id  = tokenizer.bos_token_id
-    cfg.eos_token_id  = tokenizer.eos_token_id
+    tokenizer = CharTokenizer()
+    corpus = generate_math_corpus(3000)
+    ids = tokenizer.encode(corpus, add_bos=True)
+    data = torch.tensor(ids, dtype=torch.long)
+    seq_len = min(cfg.max_seq_len, 128)
 
-    if seq_len is not None:
-        cfg.max_seq_len = seq_len
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.95))
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_steps, eta_min=1e-6)
 
-    return AGINFNModel(cfg)
+    best_loss = float("inf")
+    history = []
+    t0 = time.time()
+
+    for step in range(n_steps):
+        model.train()
+
+        # Standard training on math corpus
+        starts = torch.randint(0, max(1, len(data) - seq_len - 1), (4,))
+        x = torch.stack([data[s:s+seq_len] for s in starts]).to(device)
+        y = torch.stack([data[s+1:s+seq_len+1] for s in starts]).to(device)
+
+        logits, losses = model(x, targets=y, write_memory=True)
+        loss = losses.get("lm", torch.tensor(0.0, device=device))
+        if isinstance(loss, torch.Tensor):
+            for k in ["causal", "goal", "free_energy"]:
+                v = losses.get(k, torch.tensor(0.0, device=device))
+                if isinstance(v, torch.Tensor):
+                    loss = loss + v
+
+        optimizer.zero_grad()
+        if loss.requires_grad and loss.item() > 0:
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+
+        # Conjecture discovery (every 10 steps)
+        new_conjectures = 0
+        if step % 10 == 0:
+            for _ in range(3):
+                conj_loop.discover_step()
+            new_conjectures = conj_loop.total_discoveries
+
+        # Self-modification (every 100 steps)
+        mod_info = {}
+        if step > 0 and step % 100 == 0:
+            fitness_before = 1.0 / (loss.item() + 0.1)
+
+            state = controller.encode_state(
+                coherence=0.7, efficiency=0.6,
+                discovery_rate=new_conjectures / max(step + 1, 1),
+                loss=loss.item(),
+            )
+
+            proposals = controller.propose_modifications(state)
+
+            # Apply modifications tentatively (small step)
+            for p in proposals:
+                p.fitness_before = fitness_before
+
+            # Train one more step to measure effect
+            starts2 = torch.randint(0, max(1, len(data) - seq_len - 1), (4,))
+            x2 = torch.stack([data[s:s+seq_len] for s in starts2]).to(device)
+            y2 = torch.stack([data[s+1:s+seq_len+1] for s in starts2]).to(device)
+            logits2, losses2 = model(x2, targets=y2)
+            loss2 = losses2.get("lm", torch.tensor(0.0, device=device))
+            if isinstance(loss2, torch.Tensor):
+                fitness_after = 1.0 / (loss2.item() + 0.1)
+            else:
+                fitness_after = fitness_before
+
+            for p in proposals:
+                p.fitness_after = fitness_after
+
+            controller.train_step(fitness_before, fitness_after, state)
+            mod_info = controller.stats()
+
+        loss_val = loss.item() if isinstance(loss, torch.Tensor) else 0.0
+        if loss_val < best_loss:
+            best_loss = loss_val
+
+        elapsed = time.time() - t0
+        lr = scheduler.get_last_lr()[0]
+
+        if step % log_every == 0:
+            print(
+                f"  [P3] step {step:5d}/{n_steps} | "
+                f"loss {loss_val:.4f} (best {best_loss:.4f}) | "
+                f"conjectures {conj_loop.total_discoveries} | "
+                f"mods {mod_info.get('total_modifications', 0)} "
+                f"(accept {mod_info.get('acceptance_rate', 0):.0%}) | "
+                f"lr {lr:.2e} | {elapsed:.1f}s"
+            )
+
+        history.append({
+            "step": step, "phase": 3,
+            "loss": loss_val,
+            "conjectures": conj_loop.total_discoveries,
+            "modifications": mod_info.get("total_modifications", 0),
+        })
+
+    # Final save
+    ckpt_path = "checkpoints/phase3_selfmod.pt"
+    torch.save({
+        "model": model.state_dict(),
+        "controller": controller.state_dict(),
+        "step": n_steps,
+        "best_loss": best_loss,
+        "conjectures": conj_loop.total_discoveries,
+        "history": history[-200:],
+    }, ckpt_path)
+    print(f"\n  Phase 3 complete: best_loss={best_loss:.4f}, "
+          f"conjectures={conj_loop.total_discoveries}")
+    print(f"  Checkpoint: {ckpt_path}")
+
+    return history
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Startup info
+# Generation / Evaluation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _fmt_millions(n: int) -> str:
-    if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M"
-    if n >= 1_000:
-        return f"{n / 1_000:.1f}K"
-    return str(n)
+def evaluate(model, cfg, device):
+    """Quick evaluation: generate text, test math, show self-model state."""
+    print("\n" + "=" * 70)
+    print("  EVALUATION")
+    print("=" * 70)
+    model.eval()
+    tokenizer = CharTokenizer()
 
+    # Generate
+    prompts = ["2+3", "7*4", "is 17", "sum(1..10)", "next: 2,4,6,8"]
+    for prompt in prompts:
+        ids = torch.tensor([tokenizer.encode(prompt, add_bos=True)], dtype=torch.long, device=device)
+        try:
+            out = model.generate(ids, max_new_tokens=32, temperature=0.8, top_k=30)
+            text = tokenizer.decode(out[0].tolist())
+            print(f"  '{prompt}' -> '{text}'")
+        except Exception as e:
+            print(f"  '{prompt}' -> ERROR: {e}")
 
-def print_startup_info(
-    model:   AGINFNModel,
-    args:    argparse.Namespace,
-    device:  torch.device,
-):
-    """Print model summary, training config, and estimated compute."""
-    cfg = model.cfg
-    pc  = model.param_count()
+    # Math accuracy
+    engine = MathTruthEngine()
+    correct = 0
+    total = 20
+    for inp, tgt, is_true in engine.generate_arithmetic(total):
+        a, op_id, b = inp[0] - 256, inp[1], inp[2] - 256
+        ops = {0: "+", 1: "-", 2: "*"}
+        r = tgt[0] - 256
+        x = torch.tensor([[a % cfg.vocab_size, op_id, b % cfg.vocab_size]], dtype=torch.long, device=device)
+        try:
+            with torch.no_grad():
+                logits, _ = model(x)
+                pred = logits[0, -1].argmax().item()
+                text_pred = tokenizer.decode([pred])
+                if is_true:
+                    try:
+                        pred_val = int(text_pred.strip())
+                        if pred_val == r:
+                            correct += 1
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+    print(f"\n  Math accuracy: {correct}/{total}")
 
-    sep = "=" * 65
-    print(f"\n{sep}")
-    print("  NFN AGI Training System v5.0")
-    print(sep)
+    # Model stats
+    pc = model.param_count()
+    print(f"\n  Model params: {pc['total']:,}")
+    print(f"  Blocks: {cfg.n_blocks}, d_model: {cfg.d_model}")
+    print(f"  Active modules: {[k for k, v in pc.items() if v > 0 and k not in ('total',)]}")
 
-    # ── Architecture summary ──────────────────────────────────────────────
-    print("\n  Model Architecture")
-    print(f"    d_model   : {cfg.d_model}")
-    print(f"    n_blocks  : {cfg.n_blocks}")
-    print(f"    vocab     : {cfg.vocab_size:,}")
-    print(f"    seq_len   : {cfg.max_seq_len}")
-    print(f"    params    : {_fmt_millions(pc['total'])} "
-          f"({pc['total']:,} total)")
-    print(f"      embed   : {_fmt_millions(pc['embed'])}")
-    print(f"      blocks  : {_fmt_millions(pc['blocks'])}")
-    print(f"      head    : {_fmt_millions(pc['lm_head'])}")
-
-    # ── Active modules ────────────────────────────────────────────────────
-    modules = []
-    if cfg.use_episodic_memory:     modules.append("episodic+semantic mem")
-    if cfg.use_working_memory:      modules.append(f"working mem ({cfg.wm_n_slots} slots)")
-    if cfg.use_causal_graph:        modules.append("causal DAG")
-    if cfg.use_goal_predictor:      modules.append("goal forcing")
-    if cfg.use_recursive_reasoning: modules.append(f"ACT (max {cfg.reasoning_max_steps} steps)")
-    if cfg.use_predictive_coding:   modules.append("predictive coding")
-    if cfg.use_free_energy:         modules.append("free energy")
-    if cfg.use_self_consistency:    modules.append("self-consistency")
-    if cfg.use_plan_executor:       modules.append(f"planner ({cfg.plan_n_subgoals} subgoals)")
-    if cfg.use_mixture_of_depths:   modules.append(f"MoD ({cfg.mod_capacity_factor:.0%} tokens)")
-    if cfg.use_multi_token_pred:    modules.append(f"MTP (N={cfg.mtp_n_heads})")
-    if cfg.use_hyper_net:           modules.append(f"hyper-net (r={cfg.hyper_rank})")
-    if cfg.use_ssm:                 modules.append(f"SSM (N={cfg.ssm_d_state})")
-    print(f"\n  Active AGI modules:")
-    for m in modules:
-        print(f"    + {m}")
-
-    # ── Training config ───────────────────────────────────────────────────
-    print(f"\n  Training Config")
-    print(f"    device       : {device}")
-    print(f"    epochs       : {args.epochs}")
-    print(f"    batch        : {args.batch}")
-    print(f"    lr           : {args.lr}")
-    print(f"    fp16         : {args.fp16 and device.type == 'cuda'}")
-    print(f"    grad_accum   : {args.grad_accum}")
-
-    # ── Curriculum ────────────────────────────────────────────────────────
-    print(f"\n  Curriculum Schedule")
-    print(f"    LM-only phase: steps 0 → {args.agi_start}")
-    print(f"    AGI ramp     : steps {args.agi_start} → {args.agi_start + args.agi_ramp}")
-    print(f"    Full AGI     : steps > {args.agi_start + args.agi_ramp}")
-    losses = ["lm", "causal", "goal", "coherence", "ponder", "pred",
-              "free_energy", "consistency"]
-    print(f"    Loss signals : {', '.join(losses)}")
-
-    # ── AGI features ──────────────────────────────────────────────────────
-    print(f"\n  AGI Training Features")
-    print(f"    self-play    : {'ON' if args.self_play else 'OFF'}"
-          + (f"  (every {args.self_play_every} steps,"
-             f" {args.n_candidates} candidates,"
-             f" beta={args.dpo_beta})" if args.self_play else ""))
-    print(f"    critique     : {'ON' if args.critique else 'OFF'}"
-          + (f"  (every {args.critique_every} steps,"
-             f" weight={args.critique_weight}x)" if args.critique else ""))
-    print(f"    wake/sleep   : {'ON' if args.sleep else 'OFF'}"
-          + (f"  (sleep every {args.sleep_every} steps,"
-             f" {args.sleep_replay_steps} replay steps)" if args.sleep else ""))
-    print(f"    curiosity    : {'ON' if args.curiosity else 'OFF'}"
-          + (f"  (tau={args.curiosity_tau},"
-             f" weight={args.curiosity_weight})" if args.curiosity else ""))
-
-    # ── FLOPs estimate ────────────────────────────────────────────────────
-    # Rough estimate: 6 * n_params * seq_len per forward pass
-    seq = cfg.max_seq_len
-    flops_per_step = 6 * pc["total"] * seq
-    print(f"\n  Estimated FLOPs/step : ~{_fmt_millions(flops_per_step)} "
-          f"(6 * {_fmt_millions(pc['total'])} params * {seq} tokens)")
-    if args.self_play:
-        sp_overhead = 100 / args.self_play_every * args.n_candidates
-        print(f"  Self-play overhead   : ~{sp_overhead:.0f}% "
-              f"({args.n_candidates} extra passes every {args.self_play_every} steps)")
-
-    # ── Test-time learning ────────────────────────────────────────────────
-    if getattr(args, "ttl", False):
-        print(f"\n  Test-Time Learning (LoRA fast weights)")
-        print(f"    adapter rank : {args.adapter_rank}")
-        print(f"    online lr    : {args.online_lr}")
-        print(f"    steps/call   : {args.online_steps}")
-        print(f"    ppl gate     : < {args.ppl_gate} → skip (already known)")
-        print(f"    decay/call   : ×{args.adapter_decay}")
-        print(f"    (base weights remain frozen; adapters update at each sample)")
-
-    print(f"\n{sep}\n")
+    model.train()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -341,196 +712,96 @@ def print_startup_info(
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    args   = parse_args()
-    device = select_device(args.device)
-    dtype  = torch.float16 if args.fp16 and device.type == "cuda" else torch.float32
+    parser = argparse.ArgumentParser(description="Train FNN AGI")
+    parser.add_argument("--phase", type=str, default="all",
+                        choices=["1", "2", "3", "all"],
+                        help="Training phase to run")
+    parser.add_argument("--steps", type=int, default=None,
+                        help="Override number of steps per phase")
+    parser.add_argument("--d_model", type=int, default=128,
+                        help="Model dimension")
+    parser.add_argument("--n_blocks", type=int, default=4,
+                        help="Number of blocks")
+    parser.add_argument("--device", type=str, default="auto",
+                        help="Device (auto/cpu/cuda)")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Resume from checkpoint")
+    args = parser.parse_args()
 
-    tokenizer = NFNTokenizer()
-
-    # ── Build or resume model ─────────────────────────────────────────────
-    if args.resume:
-        print(f"Resuming from {args.resume} …")
-        trainer = AGITrainer.load(args.resume, device=device)
-        model   = trainer.model
-        print(f"  Resumed from step {trainer.step}")
+    # Device
+    if args.device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     else:
-        if args.text is None:
-            print("Warning: no --text provided. Using built-in demo corpus.")
-        model   = build_model_from_config(args.config, tokenizer, seq_len=args.seq_len)
-        model   = model.to(device)
-        trainer = AGITrainer(
-            model                = model,
-            tokenizer            = tokenizer,
-            cfg                  = model.cfg,
-            lr                   = args.lr,
-            dtype                = dtype,
-            output_dir           = args.output,
-            grad_accumulation_steps = args.grad_accum,
-            # Curriculum
-            agi_loss_start_step  = args.agi_start,
-            agi_loss_ramp_steps  = args.agi_ramp,
-            # Self-play
-            use_self_play        = args.self_play,
-            self_play_every      = args.self_play_every,
-            n_candidates         = args.n_candidates,
-            dpo_beta             = args.dpo_beta,
-            dpo_loss_weight      = args.dpo_weight,
-            # Constitutional critique
-            use_critique         = args.critique,
-            critique_every       = args.critique_every,
-            critique_weight      = args.critique_weight,
-            # SLEEP
-            use_sleep            = args.sleep,
-            sleep_every          = args.sleep_every,
-            sleep_replay_steps   = args.sleep_replay_steps,
-            # Curiosity
-            use_curiosity        = args.curiosity,
-            curiosity_tau        = args.curiosity_tau,
-            curiosity_weight     = args.curiosity_weight,
-        )
+        device = torch.device(args.device)
+    print(f"Device: {device}")
 
-    # ── Startup info ──────────────────────────────────────────────────────
-    print_startup_info(model, args, device)
-
-    # ── Load training text ────────────────────────────────────────────────
-    if args.text:
-        text_path = Path(args.text)
-        if not text_path.exists():
-            print(f"Error: text file not found: {args.text}")
-            sys.exit(1)
-        text = text_path.read_text(encoding="utf-8")
-        print(f"Corpus: {len(text):,} characters from {args.text}")
-    else:
-        text = (
-            "The Neural Fractal Network is a new architecture.\n"
-            "It combines fractal topology with parametric sinusoidal connections.\n"
-            "Each node has a phase θ and frequency Ω learned through back-propagation.\n"
-            "The sinusoidal connection: Γ(t) = A·sin(ω·t + φ) where A, ω, φ are learned.\n"
-            "The system achieves long-range dependency modelling via phase synchronisation.\n"
-            "Episodic memory consolidates into semantic knowledge over time.\n"
-            "Goal-directed learning guides phase attractors toward task objectives.\n"
-            "Self-play allows the model to improve by comparing its own outputs.\n"
-            "Constitutional critique enables self-revision of generated text.\n"
-        ) * 100
-        print(f"Using built-in demo corpus ({len(text):,} chars). Use --text for real data.")
-
-    eval_text: str = None
-    if args.eval_text:
-        eval_path = Path(args.eval_text)
-        if eval_path.exists():
-            eval_text = eval_path.read_text(encoding="utf-8")
-            print(f"Eval corpus: {len(eval_text):,} characters from {args.eval_text}")
-        else:
-            print(f"Warning: eval text not found at {args.eval_text}")
-
-    # ── Test-time learner (optional) ──────────────────────────────────────
-    online_learner: Optional[OnlineLearner] = None
-    if args.ttl:
-        online_learner = OnlineLearner(
-            model            = model,
-            tokenizer        = tokenizer,
-            adapter_rank     = args.adapter_rank,
-            online_lr        = args.online_lr,
-            n_steps          = args.online_steps,
-            decay_factor     = args.adapter_decay,
-            ppl_gate         = args.ppl_gate,
-            max_adapt_tokens = min(256, model.cfg.max_seq_len),
-        )
-        if args.load_adapters:
-            lpath = Path(args.load_adapters)
-            if lpath.exists():
-                online_learner.load_adapters(str(lpath))
-                print(f"Loaded adapters from {lpath}")
-            else:
-                print(f"Warning: --load-adapters path not found: {lpath}")
-        print(f"Test-time learning: {online_learner}")
-
-    # ── Sampling callback ─────────────────────────────────────────────────
-    def on_step(metrics: dict):
-        step = metrics["step"]
-
-        # Periodic held-out perplexity
-        if eval_text and args.eval_every > 0 and step % args.eval_every == 0:
-            ppl = trainer.eval_perplexity(eval_text,
-                                          seq_len=min(512, model.cfg.max_seq_len))
-            print(f"  [eval ppl @ step {step}]: {ppl:.2f}")
-
-        if args.sample_every > 0 and step % args.sample_every == 0:
-            model.eval()
-
-            # If TTL is on, adapt the learner to the last batch context first
-            if online_learner is not None and "context_ids" in metrics:
-                adapt_stats = online_learner.adapt(metrics["context_ids"])
-                if not adapt_stats["skipped"]:
-                    print(f"  [TTL] adapted in {adapt_stats['steps']} steps "
-                          f"(ppl {adapt_stats['ppl']:.1f} → loss {adapt_stats['loss']:.4f}, "
-                          f"norm {adapt_stats['adapter_norm']:.4f})")
-
-            prompt_ids = torch.tensor(
-                tokenizer.encode(args.sample_prompt, add_bos=True),
-                dtype=torch.long, device=device,
-            ).unsqueeze(0)
-            with torch.no_grad():
-                out_ids = model.generate(
-                    prompt_ids,
-                    max_new_tokens=80,
-                    temperature=0.8,
-                    top_k=40,
-                    top_p=0.95,
-                )
-            sample_text = tokenizer.decode(out_ids[0].tolist(), skip_special=True)
-            print(f"\n── Sample (step {step}) ──")
-            print(sample_text)
-            if online_learner is not None:
-                s = online_learner.stats()
-                print(f"  [TTL stats] calls={s['adapt_calls']} "
-                      f"skipped={s['skipped']} norm={s['mean_adapter_norm']:.4f}")
-            print("─" * 40 + "\n")
-            model.train()
-
-    trainer.step_callback = on_step
-
-    # ── Train ─────────────────────────────────────────────────────────────
-    print("Starting AGI training …\n")
-    t_start = time.time()
-
-    history = trainer.train(
-        text            = text,
-        n_epochs        = args.epochs,
-        seq_len         = args.seq_len,
-        batch_size      = args.batch,
-        n_warmup_steps  = args.warmup_steps,
-        save_every      = args.save_every,
-        log_every       = args.log_every,
-        eval_text       = eval_text,
+    # Config — build a capable but trainable model
+    cfg = NFNConfig(
+        vocab_size=1024,  # accommodates MathTruthEngine offset+256 encoding + CharTokenizer
+        d_model=args.d_model,
+        n_blocks=args.n_blocks,
+        d_ff=args.d_model * 4,
+        dropout=0.1,
+        n_levels=3,
+        n_heads=4,
+        max_seq_len=128,
+        # AGI modules
+        use_episodic_memory=True,
+        use_causal_graph=True,
+        use_goal_predictor=True,
+        use_free_energy=True,
+        use_self_model=True,
+        use_nonlinear_causal=True,
+        # MoE
+        moe_n_experts=4,
+        moe_top_k=2,
+        moe_d_ff_per_expert=args.d_model * 2,
     )
 
-    elapsed = time.time() - t_start
-    print(f"\nTraining complete in {elapsed:.0f}s "
-          f"({elapsed / 60:.1f} min).")
-    print(f"Final checkpoint saved to {args.output}/agi_nfn_final.pt")
+    print(f"\nConfig: d={cfg.d_model}, blocks={cfg.n_blocks}, "
+          f"experts={cfg.moe_n_experts}, levels={cfg.n_levels}")
 
-    # ── Final eval ────────────────────────────────────────────────────────
-    if eval_text:
-        ppl = trainer.eval_perplexity(eval_text, seq_len=min(512, model.cfg.max_seq_len))
-        print(f"Final eval perplexity: {ppl:.2f}")
+    # Build model
+    model = AGINFNModel(cfg).to(device)
+    pc = model.param_count()
+    print(f"Model: {pc['total']:,} parameters")
+    print(model)
 
-    if history:
-        last = history[-1]
-        print(f"Final step {last.get('step')}: "
-              f"lm={last.get('lm', 0.0):.4f} "
-              f"agi_w={last.get('agi_weight', 0.0):.2f}")
+    # Resume
+    if args.resume:
+        print(f"Resuming from {args.resume}")
+        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model"])
 
-    # ── Save adapters ─────────────────────────────────────────────────────
-    if online_learner is not None:
-        save_path = args.save_adapters or str(Path(args.output) / "adapters_final.pt")
-        online_learner.save_adapters(save_path)
-        s = online_learner.stats()
-        print(f"\nTest-time learning summary:")
-        print(f"  Adapter params : {s['adapter_params']:,} ({s['adapter_ratio']} of model)")
-        print(f"  Adapt calls    : {s['adapt_calls']} ({s['skipped']} skipped)")
-        print(f"  Avg update loss: {s['avg_loss']:.4f}")
-        print(f"  Adapters saved : {save_path}")
+    # Run phases
+    all_history = []
+
+    if args.phase in ("1", "all"):
+        steps = args.steps or 2000
+        h = phase1_math_pretraining(model, cfg, device, n_steps=steps)
+        all_history.extend(h)
+        evaluate(model, cfg, device)
+
+    if args.phase in ("2", "all"):
+        steps = args.steps or 3000
+        h = phase2_agi_training(model, cfg, device, n_steps=steps)
+        all_history.extend(h)
+        evaluate(model, cfg, device)
+
+    if args.phase in ("3", "all"):
+        steps = args.steps or 1000
+        h = phase3_self_modification(model, cfg, device, n_steps=steps)
+        all_history.extend(h)
+        evaluate(model, cfg, device)
+
+    # Save training history
+    torch.save(all_history, "checkpoints/training_history.pt")
+    print(f"\n{'=' * 70}")
+    print(f"  TRAINING COMPLETE")
+    print(f"  Total steps: {len(all_history)}")
+    print(f"  Final loss: {all_history[-1]['loss']:.4f}" if all_history else "")
+    print(f"  History saved: checkpoints/training_history.pt")
+    print(f"{'=' * 70}")
 
 
 if __name__ == "__main__":

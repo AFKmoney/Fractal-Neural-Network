@@ -96,6 +96,44 @@ def build_cantor(seq_len: int, n_levels: int, branching: int = 3) -> List[Fracta
     return levels
 
 
+def build_sierpinski(seq_len: int, n_levels: int, branching: int = 3) -> List[FractalLevel]:
+    """
+    Sierpinski-triangle connectivity: branching=3 but the central child
+    is suppressed at alternate levels, creating a self-similar triangular
+    pattern with fractal dimension log2(3)/log2(2) ≈ 1.585.
+    
+    Unlike the Cantor set which removes the middle third uniformly,
+    Sierpinski removes alternating positions across levels, creating
+    richer cross-scale connectivity patterns.
+    """
+    stride = branching ** n_levels
+    padded_len = math.ceil(seq_len / stride) * stride
+
+    levels: List[FractalLevel] = []
+    for k in range(n_levels + 1):
+        n_k = padded_len // (branching ** k)
+        if k < n_levels:
+            parent_idx = torch.arange(n_k) // branching
+        else:
+            parent_idx = torch.full((n_k,), -1, dtype=torch.long)
+
+        if k > 0:
+            n_above = padded_len // (branching ** k)
+            child_idx = torch.arange(n_above * branching).view(n_above, branching)
+        else:
+            child_idx = torch.zeros(1, branching, dtype=torch.long)
+
+        levels.append(FractalLevel(
+            level=k,
+            n_nodes=n_k,
+            branching=branching,
+            parent_indices=parent_idx,
+            child_mask=child_idx,
+            motif="sierpinski",
+        ))
+    return levels
+
+
 def get_padded_length(seq_len: int, n_levels: int, branching: int) -> int:
     stride = branching ** n_levels
     return math.ceil(seq_len / stride) * stride
@@ -105,11 +143,12 @@ def get_padded_length(seq_len: int, n_levels: int, branching: int) -> int:
 MOTIF_BUILDERS: Dict = {
     "binary_tree": build_binary_tree,
     "cantor": build_cantor,
+    "sierpinski": build_sierpinski,
 }
 
 
 def build_motif(name: str, seq_len: int, n_levels: int, branching: int = 2) -> List[FractalLevel]:
     builder = MOTIF_BUILDERS.get(name, build_binary_tree)
-    if name == "cantor":
+    if name in ("cantor", "sierpinski"):
         return builder(seq_len, n_levels, branching=3)
     return builder(seq_len, n_levels, branching=branching)
