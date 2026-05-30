@@ -214,6 +214,11 @@ class PhaseGoalPredictor(nn.Module):
             return theta, torch.zeros(theta.shape[:2], device=theta.device)
 
         goal = self._goal_phase.to(theta.device)
+        # If batch sizes mismatch (e.g. training was B=4, eval is B=1),
+        # re-derive goal from current context to prevent silent broadcast
+        if goal.shape[0] != theta.shape[0] and h_context is not None:
+            self.set_goal(h_context)
+            goal = self._goal_phase.to(theta.device)
         theta_forced = self.attractor(theta, goal, mask)
         alignment    = self.attractor.goal_alignment(theta_forced, goal)
         return theta_forced, alignment

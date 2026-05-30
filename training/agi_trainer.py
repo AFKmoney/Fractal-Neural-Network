@@ -31,6 +31,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from nfn.config import NFNConfig
 from nfn.agi_model import AGINFNModel, build_agi_model
 from nfn.tokenizer import NFNTokenizer
+from nfn.online_learner import OnlineLearner
 from training.losses import AGILoss
 
 
@@ -354,6 +355,10 @@ class AGITrainer:
         # Goal
         self.goal_set_every  = goal_set_every
         self.goal_prefix_len = goal_prefix_len
+
+        # Online learning (test-time adaptation)
+        self.use_online_learning = False
+        self._online_learner: Optional[OnlineLearner] = None
 
         self.device = next(model.parameters()).device
 
@@ -862,6 +867,39 @@ class AGITrainer:
 
         self.save("final")
         return self.history
+
+    # ── Online Learning Integration ────────────────────────────────────────────
+
+    def enable_online_learning(
+        self,
+        adapter_rank: int = 8,
+        online_lr: float = 2e-4,
+        n_steps: int = 4,
+        ppl_gate: float = 30.0,
+    ):
+        """Enable test-time LoRA adaptation via OnlineLearner."""
+        self.use_online_learning = True
+        self._online_learner = OnlineLearner(
+            self.model,
+            self.tokenizer,
+            adapter_rank=adapter_rank,
+            online_lr=online_lr,
+            n_steps=n_steps,
+            ppl_gate=ppl_gate,
+        )
+        return self._online_learner
+
+    def online_adapt(self, text: str) -> Dict[str, object]:
+        """Adapt model on new text at test time (LoRA fast weights)."""
+        if self._online_learner is None:
+            raise RuntimeError("Call enable_online_learning() first")
+        return self._online_learner.adapt_from_text(text)
+
+    def online_stats(self) -> Dict[str, object]:
+        """Return OnlineLearner statistics."""
+        if self._online_learner is None:
+            return {"enabled": False}
+        return {**self._online_learner.stats(), "enabled": True}
 
     # ── Logging ───────────────────────────────────────────────────────────────
 

@@ -192,6 +192,13 @@ class EfficientNFNLanguageModel(nn.Module):
         zipf_alpha = getattr(cfg, "nfmc_zipf_alpha", 1.0)
         self.lm_head = ZipfianDecoder(d, V, alpha=zipf_alpha)
 
+        # Pre-allocated phase fusion (replaces lazy creation in forward)
+        rank_val = getattr(cfg, "nfmc_rank", 32)
+        np_val = getattr(cfg, "nfmc_n_phases", 8)
+        d_fuse = rank_val + 2 * np_val
+        self._phase_fuse = nn.Linear(d_fuse, d, bias=False)
+        nn.init.normal_(self._phase_fuse.weight, std=0.01)
+
         self._condensed = False
 
     def _seed_condensate_mandelbrot(self, d: int, n_rff: int):
@@ -249,19 +256,10 @@ class EfficientNFNLanguageModel(nn.Module):
         z   = self.condensate(phi)
         theta, K_sim = self.phase_lock(z)
 
-        # Fuse: block output + phase-locked features (residual)
         cos_t = torch.cos(theta)
         sin_t = torch.sin(theta)
-        # Lightweight fusion: add phase signal to features
-        rank = z.shape[-1]
-        n_p  = theta.shape[-1]
-        if d_fuse := rank + 2 * n_p:
-            # Project phases back to d_model
-            if not hasattr(self, '_phase_fuse'):
-                self._phase_fuse = nn.Linear(d_fuse, self.cfg.d_model, bias=False).to(x.device)
-                nn.init.normal_(self._phase_fuse.weight, std=0.01)
-            phase_h = self._phase_fuse(torch.cat([z, cos_t, sin_t], dim=-1))
-            x = x + phase_h * 0.1  # small residual
+        phase_h = self._phase_fuse(torch.cat([z, cos_t, sin_t], dim=-1))
+        x = x + phase_h * 0.1
 
         x = self.out_norm(x)
         logits = self.lm_head(x)

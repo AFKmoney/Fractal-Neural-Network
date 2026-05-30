@@ -177,6 +177,19 @@ class NFNConfig:
     hyper_z_dim: int = 64                 # context embedding dimension
     hyper_scale: float = 0.02             # ΔW magnitude scale
 
+    # ── AGI v5.0 — Self-Model (Reflective Consciousness Substrate) ────────
+    use_self_model: bool = False
+    self_model_n_slots: int = 16        # global workspace slots
+    self_model_n_signals: int = 8       # introspective signal channels
+
+    # ── AGI v5.0 — Nonlinear Causal SCM ──────────────────────────────────
+    use_nonlinear_causal: bool = False   # upgrade causal graph to nonlinear SCM
+
+    # ── AGI v5.0 — Program Synthesis ─────────────────────────────────────
+    use_program_synthesis: bool = False
+    program_max_len: int = 32            # max program length in tokens
+    lambda_program: float = 0.01         # weight of program synthesis loss
+
     # ── SSM — Selective State Space (Mamba-style) ──────────────────────────
     # Adds true O(1) per-token recurrence alongside fractal attention.
     # Enables: infinite context with NO chunking, streaming state accumulation.

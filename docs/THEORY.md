@@ -3,7 +3,7 @@
 > **Subtitle:** From Fractal Topology to the Emergence of Language Without Massive Training
 > **Author:** Philippe-Antoine Robert
 > **Version:** 3.2 — Theoretical Reference Document
-> **Date:** 2026-05-03 07:22:48 UTC
+> **Date:** 2026-05-28 07:22:48 UTC
 
 ---
 

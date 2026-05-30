@@ -224,8 +224,8 @@ class FractalSSM(nn.Module):
             # b_inp * x_ averaged over D: [B, L, N]
             b_x = b_inp * x_.mean(-1, keepdim=True)   # [B, L, N]
             h_all = associative_scan(a_d, b_x)         # [B, L, N]
-            # Output: C · h  → [B, L, N] → [B, L, 1] → [B, L, D] via broadcast
-            y_ssm = (h_all * C_ssm).sum(-1, keepdim=True) * torch.ones(B, L, D, device=x.device)
+            # Output: C · h  → [B, L, N] → [B, L, D] via broadcast
+            y_ssm = (h_all * C_ssm).sum(-1, keepdim=True).expand(B, L, D)
 
         # Gating + skip + output
         y = y_ssm * F.silu(z) + x_ * self.D.unsqueeze(0).unsqueeze(0)

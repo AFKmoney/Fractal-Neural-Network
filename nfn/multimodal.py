@@ -35,6 +35,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .condensate import FractalRFF, SpectralCondensate, HelmholtzPhaseLocking
+from .flash_attn import FlashAttention
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,7 +151,7 @@ class CrossModalSync(nn.Module):
         super().__init__()
         self.n_phases = n_phases
         # Cross-modal attention: each modality queries others
-        self.cross_attn = nn.MultiheadAttention(d_shared, num_heads=4, batch_first=True)
+        self.cross_attn = FlashAttention(d_shared, n_heads=4)
         self.norm = nn.LayerNorm(d_shared)
 
     def phase_coherence(
@@ -175,7 +176,7 @@ class CrossModalSync(nn.Module):
         Enriches query modality with cross-modal context from key modality.
         Returns [B, L_q, d_shared].
         """
-        attended, _ = self.cross_attn(h_query, h_key, h_key)
+        attended = self.cross_attn(h_query, h_key, h_key)
         return self.norm(h_query + attended)
 
 

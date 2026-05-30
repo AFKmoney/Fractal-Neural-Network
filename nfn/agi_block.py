@@ -43,6 +43,8 @@ from .reasoning import SelfConsistencyCheck, PlanExecutor
 from .predictive import FreeEnergyMinimiser
 from .mixture_of_depths import MixtureOfDepths
 from .hyper import ContextHyperNet, HyperResidual
+from .self_model import SelfModel
+from .program_synthesis import ProgramSynthesizer
 
 
 class AGIBlock(nn.Module):
@@ -102,6 +104,7 @@ class AGIBlock(nn.Module):
                 n_slots  = cfg.causal_n_slots,
                 hidden   = cfg.causal_hidden,
                 sparsity = cfg.causal_sparsity,
+                use_nonlinear = cfg.use_nonlinear_causal,
             )
 
         # ── Goal-Directed Phase Forcing ───────────────────────────────────
@@ -141,6 +144,23 @@ class AGIBlock(nn.Module):
             self.hyper = HyperResidual(d, cfg.hyper_z_dim)
         else:
             self.hyper_net = None
+
+        # ── Self-Model (Reflective Consciousness Substrate) ────────────────
+        self.self_model: Optional[SelfModel] = None
+        if cfg.use_self_model:
+            self.self_model = SelfModel(
+                d_model   = d,
+                n_slots   = cfg.self_model_n_slots,
+                n_signals = cfg.self_model_n_signals,
+            )
+
+        # ── Program Synthesis ──────────────────────────────────────────────
+        self.prog_synth: Optional[ProgramSynthesizer] = None
+        if cfg.use_program_synthesis:
+            self.prog_synth = ProgramSynthesizer(
+                d_model          = d,
+                max_program_len  = cfg.program_max_len,
+            )
 
         # ── Stream fusion ─────────────────────────────────────────────────
         n_streams = 1
@@ -265,6 +285,22 @@ class AGIBlock(nn.Module):
                 goal_phase = self.goal._goal_phase
             z, _ = self.hyper_net(h_fused, goal_phase)
             h_fused = self.hyper(h_fused, z)
+
+        # ── 10. Self-Model (reflective consciousness) ──────────────────────
+        if self.self_model is not None:
+            h_fused, self_state = self.self_model(h_fused, losses)
+            losses["self_model_coherence"] = losses.get("self_model_coherence", 0.0) + \
+                self_state.var(dim=-1).mean() * 0.001
+
+        # ── 11. Program Synthesis (neuro-symbolic reasoning) ───────────────
+        if self.prog_synth is not None and self.training:
+            problem_embed = h_fused.mean(dim=1)
+            target_embed = h_fused[:, -1, :]
+            prog_loss, prog_metrics = self.prog_synth(problem_embed, target_embed)
+            losses["program"] = losses.get("program", 0.0) + prog_loss * self.cfg.lambda_program
+            for k, v in prog_metrics.items():
+                if isinstance(v, torch.Tensor) and v.dim() == 0:
+                    losses[f"prog_{k}"] = losses.get(f"prog_{k}", 0.0) + v
 
         return h_fused, losses
 

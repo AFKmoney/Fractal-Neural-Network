@@ -498,6 +498,9 @@ class AGINFNModel(nn.Module):
         if cfg.use_streaming:             mods.append(f"streaming (W={cfg.streaming_window_size})")
         if cfg.use_hyper_net:             mods.append(f"hyper-net (r={cfg.hyper_rank})")
         if cfg.use_ssm:                   mods.append(f"SSM (N={cfg.ssm_d_state})")
+        if cfg.use_self_model:            mods.append(f"self-model ({cfg.self_model_n_slots} slots)")
+        if cfg.use_nonlinear_causal:      mods.append("nonlinear causal SCM")
+        if cfg.use_program_synthesis:     mods.append(f"program synthesis (len={cfg.program_max_len})")
         return (
             f"AGINFNModel(\n"
             f"  vocab={cfg.vocab_size}  d={cfg.d_model}  blocks={cfg.n_blocks}\n"
@@ -528,7 +531,10 @@ def build_agi_model(
     use_mod:                bool  = True,
     use_mtp:                bool  = True,
     use_hyper:              bool  = True,
-    use_ssm:                bool  = False,    # Mamba-style SSM recurrence
+    use_ssm:                bool  = False,
+    use_self_model:         bool  = False,
+    use_nonlinear_causal:   bool  = False,
+    use_program_synthesis:  bool  = False,
     **kwargs,
 ) -> AGINFNModel:
     """
@@ -556,6 +562,9 @@ def build_agi_model(
         use_multi_token_pred    = use_mtp,
         use_hyper_net           = use_hyper,
         use_ssm                 = use_ssm,
+        use_self_model          = use_self_model,
+        use_nonlinear_causal    = use_nonlinear_causal,
+        use_program_synthesis   = use_program_synthesis,
         **kwargs,
     )
     return AGINFNModel(cfg)
