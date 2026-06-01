@@ -1,3 +1,4 @@
+from typing import List, Optional
 """
 NFN v4.0 — Phase Goal Predictor (Agency Module)
 
