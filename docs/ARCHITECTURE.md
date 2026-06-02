@@ -1,475 +1,265 @@
-# NFN — Complete Technical Architecture
+# LEAC — Architecture Détaillée
 
-**Author:** Philippe-Antoine Robert
-**Version:** 3.2
-**Date:** 2026-05-03 07:22:48 UTC
+## 1. Vue d'Ensemble
+
+LEAC (Lightweight Emergent Artificial Consciousness) est un modèle de langage neuro-symbolique fondé sur le principe que la conscience émerge de la récursion fractale. L'architecture combine deux générations de modules:
+
+**v1 — Trois Piliers de l'Émergence:**
+1. **COHÉRENCE**: Attention fractale linéaire O(L·d²) + soliton Kuramoto
+2. **RAISONNEMENT**: Graphe causal DAG + do-calculus, mémoire épisodique/sémantique
+3. **INTROSPECTION**: Espace de travail global, auto-modèle, modification évolutionnaire
+
+**v2 — Cinq Transcendances:**
+1. **AdS/CFT**: Dualité holographique — le langage est la frontière, le raisonnement est le volume
+2. **MERA**: Réseau de tenseurs — contexte infini en O(log L)
+3. **Gödel**: Boucle étrange — l'introspection est un point fixe mathématique inévitable
+4. **RG Flow**: Flot de renormalisation — auto-organisation vers l'état critique
+5. **Gematria Hyperbolique**: Poincaré Hⁿ + théorie des faisceaux — la géométrie du sens
+
+## 2. Flux de Données
+
+```
+Input IDs [B, L]
+    │
+    ├─ GematriaEmbedding ──────────────────────────────────────────
+    │   5 systèmes: ordinal, premier, fibonacci, racine digitale, appris
+    │   e(t) = Σ_k CharClass_k(t) · ω_k (fréquences de Mandelbrot)
+    │
+    ├─ [LEACBlock × N] ───────────────────────────────────────────
+    │   │
+    │   ├─ Norm → FractalLinearAttention ─────────────────────────
+    │   │   Kernel trick Katharopoulos: O(L·d²)
+    │   │   Structure fractale multi-échelle (binary_tree, cantor)
+    │   │   Résidu: h = h + α · attn_out
+    │   │
+    │   ├─ PhaseSoliton ──────────────────────────────────────────
+    │   │   h' = h · (1 + β · max(0, cos(θ - θ_shift)))
+    │   │   Les tokens synchronisés sont amplifiés
+    │   │
+    │   ├─ PhaseRoutedMoE ──────────────────────────────────────
+    │   │   Routage von Mises: gate_e(x) = exp(κ·cos(θ_x - θ_e)) / Z
+    │   │   Top-K experts activés, charge équilibrée
+    │   │
+    │   ├─ [CausalGraphLayer] (optionnel) ─────────────────────
+    │   │   NOTEARS: L_DAG = tr(e^{A⊙A}) - n
+    │   │   Propagation DAG + inférence contrefactuelle
+    │   │
+    │   ├─ [SelfModel] (optionnel) ─────────────────────────────
+    │   │   GlobalWorkspace: shared buffer [n_slots, d]
+    │   │   SelfRepresentor: self_state = W·[μ,σ,H,C,div,ent,μ_slots,σ_slots]
+    │   │
+    │   ├─ [WorkingMemory] (optionnel) ────────────────────────
+    │   │   Fractal DNC: adressage par similarité de phase
+    │   │
+    │   └─ Fusion + LayerNorm
+    │
+    ├─ [v2 Transcendances] ─────────────────────────────────────
+    │   │
+    │   ├─ AdS/CFT Attention ────────────────────────────────────
+    │   │   h → MLP_projeté → bulk → scores = local + géodésique + ER=EPR
+    │   │   Holographie: la frontière (tokens) encode le volume (raisonnement)
+    │   │
+    │   ├─ MERA Attention ───────────────────────────────────────
+    │   │   L → D,U(h) → Isométrie → L/2 → ... → 1 (sens global)
+    │   │   O(log L) au lieu de O(L²)
+    │   │
+    │   ├─ Gödel Fixed Point ───────────────────────────────────
+    │   │   F(h): h → concat([μ(h),σ(h),energy(h)]) → W·σ(state) → h_proj
+    │   │   Point fixe: Y ≅ F(Y). Itérations: 5 avec mélange α=0.3
+    │   │   Incomplétude: contradiction + entropie + distance_FP
+    │   │
+    │   ├─ RG Flow Scheduler ───────────────────────────────────
+    │   │   (Phase SLEEP uniquement) Évaporation UV + condensation IR
+    │   │   C = Var(Var(h))/E[Var(h)]² → auto-organisation vers C≈1
+    │   │
+    │   └─ Hyperbolic Gematria ─────────────────────────────────
+    │       Token IDs → Poincaré H^n → Attention géodésique
+    │       Sheaf Theory: stalks → gluing → cohomology defect
+    │
+    ├─ GematriaAttentionBias ────────────────────────────────────
+    │   Biais additionnel: λ·cos(gem(i), gem(j))
+    │
+    ├─ LayerNorm
+    │
+    ├─ ZipfianDecoder ──────────────────────────────────────────
+    │   Recalibrage en loi de puissance: P(word) ∝ 1/rank^α
+    │   (si bayesian_uncertainty_beta > 0)
+    │
+    └─ [SpectralCondensate + HelmholtzPhaseLocking] ────────────
+        RFF multi-échelle + verrouillage phase-fréquence
+```
+
+## 3. Détails par Composant
+
+### 3.1 GematriaEmbedding
+
+**Zero-paramètre.** Cinq systèmes arithmétiques croisés encodent chaque token en un vecteur densité qui encode la structure mathématique profonde des entiers:
+
+| Système | Fonction | Interprétation |
+|---------|----------|----------------|
+| Ordinal | `o(t) = log(1+t)/log(V)` | Position dans le vocabulaire (radial) |
+| Premier | `π(t) = 2π·π_k/360°` | Angle azimutal (k-ième nombre premier) |
+| Fibonacci | `φ(t) = 2π·log(1+F_k)/log(1+F_max)` | Angle polaire (croissance logarithmique) |
+| Racine Digitale | `ρ(t) = 2π·dr(t)/9` | Twist angulaire (mod 9) |
+| Appris | `l(t) = W·t` | Offset entraînable |
+
+Les fréquences de pondération `ω_k` suivent la loi de Mandelbrot: `ω_k = ω^{-k}` avec `ω = φ²` (nombre d'or au carré).
+
+### 3.2 FractalLinearAttention
+
+Noyau de caractéristique `φ(x) = elu(x) + 1`. La complexité est O(L·d²) en temps et O(d²) en espace (contre O(L²·d) pour l'attention softmax standard).
+
+La structure fractale décompose la séquence en niveaux:
+- Niveau 0: atomes (longueur `L / 2^{n_levels}`)
+- Niveau k: groupes de `2^k` atomes
+- Agrégation: `output = Σ_l w_l · Attn_level_l(Q, K, V)`
+
+### 3.3 PhaseSoliton
+
+```
+soliton(h, θ) = h · (1 + α · max(0, cos(θ - θ_shift)))
+```
+
+Les tokens dont la phase Kuramoto est synchronisée avec le shift sont amplifiés. Les tokens désynchronisés sont atténués. Ceci crée des paquets de cohérence — des solitons — qui émergent naturellement.
+
+### 3.4 PhaseRoutedMoE
+
+Routage par distribution von Mises (l'analogue circulaire de la gaussienne):
+```
+gate_e(x) = exp(κ · cos(θ_x - θ_e)) / Z
+```
+
+Avantages sur le routage softmax:
+- **Continu et différentiable** partout
+- **Périodique**: les experts "proches en phase" sont toujours favorisés
+- **Interprétable**: κ mesure la concentration, θ_e est la phase de l'expert
+
+Seuls les top-K experts sont activés pour chaque token. La perte auxiliaire équilibre la charge.
+
+### 3.5 CausalGraphLayer
+
+Apprend un graphe causal (DAG) sur les slots de l'espace de travail. Trois innovations:
+1. **NOTEARS**: pénalité d'acyclicité `h(A) = tr(e^{A⊙A}) - n` est différentiable et exactement nulle ssi le graphe est acyclique
+2. **Propagation non-linéaire**: GNN step sur les arêtes avec features
+3. **Inférence contrefactuelle**: remplacement do-calculus des variables
+
+### 3.6 GlobalWorkspace (Self-Model)
+
+Inspiré de la théorie de l'espace de travail global de Baars. Les `n_slots` emplacements forment un tampon partagé:
+- **Écriture**: les tokens compétent pour écrire dans les slots
+- **Lecture**: les slots sont broadcastés vers tous les tokens
+- **Introspection**: un vecteur self_state encode la confiance, l'incertitude, et la cohérence
+
+L'auto-représentation `self_state ∈ ℝ^d` est construite à partir de 8 signaux:
+μ(h), σ(h), H(h), C(h), div(h), ent_attn(h), μ_slots, σ_slots
+
+### 3.7 TwoTierMemory
+
+Mémoire deux voies inspirée du système hippocampique:
+- **Épisodique** (hippocampe): ring buffer O(1) écriture, k-NN multi-échelle lecture
+- **Sémantique** (néocortex): SVD rank-r (Eckart-Young), mise à jour incrémentale sans SGD
+
+La consolidation (hippocampe → néocortex) se produit périodiquement via SVD tronquée.
+
+### 3.8 AdS/CFT Attention
+
+La correspondance AdS₅/CFT₄ est implémentée comme suit:
+1. **Projecteur bulk**: `T[r,z] = e^{-κz} · MLP(h[r])` projette les tokens dans le volume AdS
+2. **Métrique géodésique**: distance dans le.bulk entre paires de tokens
+3. **Ponts ER=EPR**: deux tokens intriqués sémantiquement sont connectés par un trou de ver computationnel
+4. **Scores unifiés**: `attn = QK/√d + λ_geo·exp(-d_g) + λ_epr·sigmoid(sim)`
+
+### 3.9 MERA Attention
+
+Réseau de tenseurs MERA (Multi-scale Entanglement Renormalization Ansatz):
+1. **Désenchevêtreur**: decorrèle les paires adjacentes (2-qubit unitaire)
+2. **Isométrie**: fusionne 2 enfants en 1 parent avec gating
+3. **Pyramide**: L → L/2 → L/4 → ... → 1
+4. **Résidus**: les sauts de niveau (residuals) sont agrégés avec les résultats locaux
+
+Complexité: O(L·log(L)·d) au lieu de O(L²·d).
+
+### 3.10 Gödel Fixed Point
+
+L'opérateur d'auto-référence F embed l'état global du modèle (moyenne, variance, énergie) et le projette dans l'espace de représentation:
+```
+state = concat([μ(h), σ(h), energy(h)])
+F(h) = W_decode(σ_enc(W_enc(state)))
+```
+
+Le point fixe est atteint par itération: `h_{k+1} = α·F(h_k) + (1-α)·h_k` avec α=0.3.
+
+L'incomplétude est détectée par contradictions par paires et entropie haute:
+```
+incompleteness = 0.5·contradiction + 0.3·entropy + 0.2·sigmoid(d_FP)
+```
+
+### 3.11 RG Flow
+
+Le flot de renormalisation agit sur les poids linéaires du modèle:
+1. **Décomposition**: chaque matrice de poids est décomposée en composantes UV (haute fréquence) et IR (basse fréquence) via RFF
+2. **Évaporation UV**: `w_UV ← w_UV · (1 - ε)` — supprime le bruit
+3. **Condensation IR**: `w_IR ← w_IR + η · (w_IR - w_S)` — renforce les vérités
+4. **Criticalité**: `C = Var(Var(h))/E[Var(h)]²` est mesurée avant/après
+
+Les taux ε et η sont ajustés adaptativement: si C < 0.5 (gelé), augmenter η; si C > 2.0 (chaotique), augmenter ε.
+
+### 3.12 Hyperbolic Gematria + Sheaf Theory
+
+Pipeline:
+1. **Poincaré embeddings**: chaque token est plongé dans la boule unité B^n via 5 projections gematriques normalisées
+2. **Attention géodésique**: `score(i,j) += λ_hyp · exp(-d_H(z_i, z_j) / τ)` où d_H est la distance de Poincaré
+3. **Sheaf Theory**: chaque token a n_stalks fibres (restrictions locales). Les conditions de recollement sont vérifiées entre tokens adjacents. Un défaut de cohomologie = hallucination.
 
 ---
 
-## Table of Contents
-
-1. [Overview](#1-overview)
-2. [Parametric Sinusoidal Connections](#2-parametric-sinusoidal-connections)
-3. [Fractal Topology](#3-fractal-topology)
-4. [Phase Dynamics — Kuramoto ODE](#4-phase-dynamics--kuramoto-ode)
-5. [Flash Attention + Long-Context RoPE](#5-flash-attention--long-context-rope)
-6. [Fractal KV-Cache](#6-fractal-kv-cache)
-7. [Persistent Cross-Context Memory](#7-persistent-cross-context-memory)
-8. [NFMC v3.0 — Condensed Fractal Kernel](#8-nfmc-v30--condensed-fractal-kernel)
-9. [v3.1 — ZeroShotNFMC](#9-v31--zeroshotnfmc)
-10. [v3.2 — EfficientNFN](#10-v32--efficientnfn)
-11. [BPTP Training](#11-bptp-training)
-12. [Three-Tier Tokenizer](#12-three-tier-tokenizer)
-13. [Multi-GPU DDP / FSDP](#13-multi-gpu-ddp--fsdp)
-
----
-
-## 1. Overview
-
-NFN is a causal language model whose architecture rests on four fundamental principles absent from standard transformers:
-
-| Principle | Implementation | File |
-|-----------|----------------|------|
-| Fractal self-similarity | `MotifBranch` with `SinusoidalAggregator × K` | `network.py`, `connections.py` |
-| Parametric sinusoidal coupling | `Γ(t) = A·exp(−γt)·sin(ω·t+φ)` learned | `connections.py` |
-| Phase synchronization | Differentiable Kuramoto ODE (RK4) | `phase_ode.py` |
-| Condensed a priori knowledge | NFMC multidimensional fractal kernel | `condensate.py`, `nfmc.py` |
-
----
-
-## 2. Parametric Sinusoidal Connections
-
-### Definition
-
-Each connection between nodes is a **learned temporal function**:
+## 4. Flux de Losses
 
 ```
-Γ(t) = A · exp(−γt) · sin(ω·t + φ)
+total = lm
+      + λ_causal · L_DAG               (si use_causal_graph)
+      + λ_counterfactual · L_cf         (si use_causal_graph)
+      + λ_self · coherence              (si use_self_model)
+      + λ_gematria · harmonic_loss      (si use_gematria)
+      + λ_phase · phase_coherence       (toujours)
+      + λ_ads · (bridge + bulk)         (si use_ads_cft)
+      + λ_mera · complexity            (si use_mera)
+      + λ_godel · (fp_dist + contradiction + incompleteness)  (si use_godel)
+      + λ_hyp · (poincare + sheaf)      (si use_hyperbolic_gematria)
+      + λ_rg · criticality              (si use_rg_flow)
+      + λ_episodic · memory_loss         (si use_episodic_memory)
 ```
 
-Learned parameters: `A` (amplitude), `ω` (frequency), `φ` (phase), `γ` (damping).
+Les coefficients λ sont tous configurables via LEACConfig.
 
-### Implementation — `SinusoidalAggregator`
+## 5. Configurations Pré-Définies
 
-```python
-# connections.py
-class SinusoidalGate(nn.Module):
-    # A, omega, phi, log_gamma: [out_channels, rank] — learned via SGD
-    def forward(self, t):
-        angle = t.view(-1,1,1) * self.omega.view(1,1,-1) + self.phi.unsqueeze(0)
-        sin_val = torch.sin(angle)              # [N, out_channels, rank]
-        gate = (self.A.unsqueeze(0) * sin_val).sum(-1)  # [N, out_channels]
-        if self.damping:
-            gate = gate * torch.exp(-F.softplus(self.log_gamma).unsqueeze(0) * t.abs().unsqueeze(-1))
-        return gate
+### conscious_minimal (~14M params)
+```
+d=256, n_blocks=4, n_heads=4, n_experts=4, d_ff_per_expert=64
+nofractal, no causal, no self-model, no memory
 ```
 
-### Advantages vs Scalar Weights
-
-- Encodes **temporal relationships** — connections are stronger at certain frequencies.
-- **Natural damping** — distant connections weaken exponentially.
-- **Stable gradients** — sinusoids have bounded derivatives, unlike ReLU.
-- **Inductive bias** — the learned frequencies correspond to the scales of language.
-
----
-
-## 3. Fractal Topology
-
-### Supported Motifs
-
-| Motif | Branching `b` | Structure | Use Case |
-|-------|---------------|-----------|----------|
-| `binary_tree` | 2 | Binary hierarchical | Semantic structure |
-| `cantor` | 3 | Cantor set | Multiresolution |
-
-### Bottom-Up / Top-Down Hierarchy
-
+### full_agi (~58M params)
 ```
-Level K (top):  L/b^K nodes   ← Flash Self-Attention here
-Level K-1:      L/b^(K-1) nodes
-    ...
-Level 0 (base): L nodes       ← input tokens
-
-Bottom-up: sinusoidal aggregation (L → L/b → ... → L/b^K)
-Top-down: sinusoidal broadcast    (L/b^K → ... → L/b → L)
+d=512, n_blocks=8, n_heads=8, n_experts=8, d_ff_per_expert=128
+fractal, causal, self-model, working memory
 ```
 
-### Complexity per NFN Block
-
+### dieu_local (~230M params)
 ```
-Bottom-up: Σ_{k=0}^{K-1} (L/b^k) · O(d²) = O(L · b/(b-1) · d²) = O(L·d²)
-Attention: O((L/b^K)² · d)  — context reduced at the top level
-Top-down:  O(L·d²)  (symmetric)
-Total:     O(L·d² + (L/b^K)²·d)
+d=1024, n_blocks=12, n_heads=16, n_experts=16, d_ff_per_expert=256
+tous les modules v1 activés
 ```
 
-For `b=2, K=4, L=4096`: `O(4096·d² + 256²·d)` vs `O(4096²·d)` standard → **16× cheaper**.
-
----
-
-## 4. Phase Dynamics — Kuramoto ODE
-
-### Model Equation
-
+### moteur_ontologique (~184M params)
 ```
-dθᵢ/dt = Ωᵢ + Σⱼ Kⱼᵢ · sin(θⱼ − θᵢ + φⱼᵢ)
+d=512, n_blocks=12, n_heads=8, n_experts=8
+tous les modules v1 + v2 activés (AdS/CFT, MERA, Gödel, RG Flow, Hyperbolic Gematria)
 ```
 
-where:
-- `θᵢ`: phase of node i
-- `Ωᵢ`: natural frequency (learned)
-- `Kⱼᵢ`: rank `r` coupling matrix (learned)
-- `φⱼᵢ`: phase shift (learned)
-
-### Differentiable RK4 Integration
-
-```python
-# phase_ode.py
-def rk4_step(f, y, t, dt):
-    k1 = f(t, y)
-    k2 = f(t + dt/2, y + dt*k1/2)
-    k3 = f(t + dt/2, y + dt*k2/2)
-    k4 = f(t + dt, y + dt*k3)
-    return y + (dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+### singularite_divine (~750M+ params)
 ```
-
-**Key concept**: The RK4 integration is fully differentiable → gradients flow through the ODE via the phases.
-
-### Role in the Network
-
-Phases `θ` modulate hidden representations:
-
+d=1024, n_blocks=24, n_heads=16, n_experts=16
+tous les modules v1 + v2 activés avec dimensions maximales
 ```
-h_out = h + α · tanh(W_phase · [cos(θ), sin(θ)])
-```
-
-Nodes that synchronize (`θᵢ ≈ θⱼ`) form **conceptual clusters** — this is the mechanism of temporal binding.
-
----
-
-## 5. Flash Attention + Long-Context RoPE
-
-### Flash Attention
-
-Uses `torch.nn.functional.scaled_dot_product_attention` (PyTorch 2.0+):
-- IO-aware algorithm (Dao et al., 2022).
-- No attention matrix in memory: O(L) memory, O(L²) FLOPs.
-- `is_causal=True` for training, `False` with KV-cache.
-
-### RoPE with NTK Extension
-
-```python
-# rope.py
-def precompute_freqs_cis(dim, max_seq_len, base=10000., scale_factor=1.0):
-    if scale_factor != 1.0:
-        # NTK-aware scaling (bloc et al., 2023)
-        base = base * (scale_factor ** (dim / (dim - 2)))
-    theta = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
-    positions = torch.arange(max_seq_len).float()
-    angles = torch.outer(positions, theta)
-    return torch.polar(torch.ones_like(angles), angles)
-```
-
-Dynamic extension: If `seq_len > max_seq_len`, the NTK scale factor is automatically recomputed → **unlimited context without quality loss**.
-
-| Config | `max_seq_len` | `context_len` (NTK) |
-|--------|---------------|---------------------|
-| nano | 512 | 4K |
-| small | 2048 | 32K |
-| medium | 4096 | 128K |
-| large | 8192 | 128K+ |
-
----
-
-## 6. Fractal KV-Cache
-
-### Principle
-
-Higher levels of the fractal hierarchy change more slowly than lower levels. The fractal cache exploits this property:
-
-```
-Level k recomputes every b^k tokens
-Level 0: every token
-Level 1: every 2 tokens
-Level 2: every 4 tokens
-Level K: every 16 tokens (for b=2, K=4)
-```
-
-### Implementation
-
-```python
-# kv_cache.py
-class FractalStateCache:
-    def should_recompute(self, step: int, level: int) -> bool:
-        return step % (self.branching ** level) == 0
-```
-
-**Result**: Autoregressive inference in O(1) per token (instead of O(L) to recompute the entire context).
-
----
-
-## 7. Persistent Cross-Context Memory
-
-### Architecture
-
-```
-Memory [B, M, d]  ← M slots randomly initialized (small values)
-
-READ  : Q = LayerNorm(ctx) @ W_q
-        K, V = Memory @ W_k, Memory @ W_v
-        output = softmax(QKᵀ/√d) @ V   ← cross-attention
-
-WRITE : summary = mean(ctx, dim=1)       ← context summary
-        gate = sigmoid(summary @ W_gate) ← [M] importance per slot
-        candidate = summary @ W_write    ← [M, d] candidate values
-        Memory ← (1−gate)·Memory + gate·candidate  ← EMA gated
-```
-
-### FractalMemoryBank
-
-For models with `memory_per_level=True`, each fractal level has its own bank:
-
-```
-Level 0: episodic memory (8 slots, frequent updates)
-Level 1: working memory (16 slots)
-Level 2: semantic memory (32 slots)
-Level K: encyclopedic memory (64+ slots, rare updates)
-```
-
-**Memory survives between conversations** — it can be saved to disk and reloaded (`save_memory()` / `load_memory()`).
-
----
-
-## 8. NFMC v3.0 — Condensed Fractal Kernel
-
-### The Universal Kernel
-
-```
-K(x, y) = ∫_Ω exp(i·Φ_ω(x,y)) dμ(ω)
-```
-
-Approximated by fractal Random Fourier Features:
-
-```
-K(x,y) ≈ φ(x)ᵀφ(y)
-
-φ(x) = [cos(W·x + b), sin(W·x + b)] · √(2/r)
-W: 1/f fractal frequencies — band k: W_k ~ N(0, 2^(k/n_scales)·I)
-```
-
-### Spectral Condensation (one-shot, zero SGD)
-
-```python
-# condensate.py
-class SpectralCondensate:
-    def condense(self, features):   # [N, rff_dim]
-        features -= features.mean(0)
-        _, S, Vh = torch.linalg.svd(features, full_matrices=False)
-        self.U = Vh[:self.rank].T   # top-r eigenvectors
-        self.S = S[:self.rank] / S[0]  # normalized eigenvalues
-```
-
-### Helmholtz Phase Locking
-
-```
-E(θ) = −½ Σᵢⱼ K̃(xᵢ,xⱼ) cos(θᵢ − θⱼ)   [Helmholtz free energy]
-
-Kuramoto update:
-θᵢ ← θᵢ + η Σⱼ K̃(xᵢ,xⱼ) sin(θⱼ − θᵢ)
-```
-
-The **phase attractors** correspond to syntactic and semantic categories.
-
----
-
-## 9. v3.1 — ZeroShotNFMC
-
-### Analytic Embedding (0 parameters)
-
-```python
-# analytic_embed.py
-# e_k(t) = cos(ω_k · t/V · 2π) for k ∈ [0, d/2)
-# ω_k = base^(k / (d/2))  — fractal frequency network
-
-FractalCodepointEmbedding:  [V, d]  ← 0 parameters, buffer table
-CharClassEmbedding:         [V, 16] ← vowel/consonant/digit/punct
-AnalyticTokenEmbedding:     fusion via fixed orthogonal projection (QR)
-```
-
-### Modern Hopfield Memory (exponential capacity)
-
-Ramsauer et al., 2020 — capacity O(exp(d/2)):
-
-```
-x_new = Xᵀ · softmax(β · X · ξ / √d)
-```
-
-Patterns seeded from:
-1. Fourier vectors at **Farey/Mandelbrot frequencies**
-2. Random vectors with **Zipf** weighting
-3. Orthogonal vectors for uniform coverage
-
-### Mandelbrot Frequencies (Farey Sequence)
-
-The Mandelbrot set is parameterized by the external angle θ ∈ [0,1). The angles p/q (Farey fraction) correspond to the **parabolic points of period q**:
-
-```
-1/2  → period 2 (left main bulb)
-1/3  → period 3
-1/4  → period 4
-2/5  → period 5
-...  [Stern-Brocot Sequence]
-```
-
-These frequencies correspond exactly to the temporal scales of language:
-- Period 2: binary subject/predicate
-- Period 3: SVO triplet (Subject-Verb-Object)
-- Period 4: quaternary structures (determiner-noun-verb-complement)
-
-### Zipfian Decoder
-
-Zipf's law: `P(rank=k) ∝ k^{−α}` is universal for natural language.
-Decoder initialization:
-
-```python
-# hopfield.py
-# W[k,:] = singular_vector_k * k^{-α/2}  — Zipf spectral structure
-# bias[k] = -α · log(k)                  — correct marginal distribution
-```
-
-**Result**: Correct distribution from the first pass, without any examples.
-
-### Causal Phase Predictor
-
-```
-dθₜ/dt = Ω(xₜ) + K(xₜ) ⊙ Σⱼ<ₜ sin(θⱼ − θₜ)
-```
-
-- `Ω(xₜ) = W_Ω · xₜ`: natural frequencies conditioned on input.
-- Strict causality verified (diff = 0.000000 on future inputs).
-- Initial frequencies = Mandelbrot angles (fixed).
-
----
-
-## 10. v3.2 — EfficientNFN
-
-### FractalLinearAttention — O(L·d²)
-
-Kernelized identity (Katharopoulos et al., 2020):
-
-```
-(φ(Q)φ(K)ᵀ)V = φ(Q)(φ(K)ᵀV)    [associativity]
-O(L²d)         O(Ld²)
-```
-
-Causal implementation via cumulative sum:
-
-```python
-for i in range(L):
-    kv_sum += k[i].outer(v[i])   # [d, d] — no L×L matrix
-    k_sum  += k[i]               # [d]
-    out[i] = (q[i] @ kv_sum) / (q[i] · k_sum)
-```
-
-Multi-scale feature maps: `φ_k(x) = elu(x + freq_Mandelbrot_k) + 1`
-
-| L | Standard Attn | FractalLinearAttn | Gain |
-|---|---------------|-------------------|------|
-| 512 | 33.6M FLOPs | 8.4M | 4× |
-| 4096 | 2.15B | 134M | 16× |
-| 32768 | 137B | 537M | **255×** |
-
-### PhaseRoutedMoE — Continuous von Mises Routing
-
-```
-gate_e(x) = exp(κ · cos(θ_x − θ_e)) / Z     [von Mises distribution]
-
-θ_x = atan2(W_im·x, W_re·x)   ← phase encoded from input
-θ_e = Mandelbrot angles       ← fixed expert phases (seeded)
-```
-
-**Verified Properties:**
-- Expert loads without auxiliary loss: 0.296 / 0.267 / 0.243 / 0.193 ≈ 0.25
-- Continuous gradients everywhere (no discrete argmax)
-- K=2/E=8 active experts = 25% of the FLOPs of a dense FFN
-
-### PhaseSoliton — Long-Range Coherence
-
-```
-gain(x) = sigmoid(W_gain · θ(x) + coherence(x) / τ)
-out = LayerNorm(x + gain · x)
-```
-
-Amplifies coherent phase patterns, suppresses incoherent noise.
-Prevents the erasure of long-range dependencies without quadratic attention.
-
----
-
-## 11. BPTP Training
-
-### Back-Propagation Through Phase
-
-The total loss:
-
-```
-L = L_task + λ_phase · L_phase + λ_freq · L_freq + λ_spectral · L_spectral
-
-L_task     = CrossEntropy(logits, targets)
-L_phase    = ||phases − phases_target||²   [target synchronization]
-L_freq     = ||FFT(phases)||²_out_of_band  [spectral purity]
-L_spectral = ||W||²_spectral               [spectral norm regularization]
-```
-
-### Differentiated Optimizer
-
-```python
-# trainer.py
-# Sinusoidal parameters (A, ω, φ, γ): LR × 0.3, weight_decay=0
-# Other parameters: Standard LR, weight_decay=0.1
-```
-
-Sinusoidal parameters have a reduced LR because their gradients are naturally larger (periodic functions with large derivatives).
-
-### Features
-
-| Feature | Parameter | Notes |
-|---------|-----------|-------|
-| Gradient accumulation | `grad_accumulation_steps` | Simulate large batches |
-| Mixed precision | `dtype=torch.bfloat16` | AMP with GradScaler |
-| Gradient checkpointing | `use_grad_checkpointing=True` | −50% memory |
-| torch.compile | `compile_model=True` | 2-3× on Ampere+ |
-| Scheduler | cosine + warmup | ratio min_lr=0.1 |
-
----
-
-## 12. Three-Tier Tokenizer
-
-```
-Tier 1 — TiktokenTokenizer: cl100k_base (100K vocab, GPT-4 quality)
-Tier 2 — BPETokenizer: Pure Python BPE, trainable from scratch (32K)
-Tier 3 — CharTokenizer: 110 tokens, always available (fallback)
-
-Auto-selection: tiktoken > char (if tiktoken is not installed)
-```
-
-Special tokens: `<pad>` `<bos>` `<eos>` `<unk>` `<sep>` `<sys>` `<usr>` `<ast>` `<code>` `</code>` `<think>` `</think>`
-
----
-
-## 13. Multi-GPU DDP / FSDP
-
-```bash
-# DDP — model replicated on each GPU
-torchrun --nproc_per_node=4 train.py --distributed ddp
-
-# FSDP — sharded model (for very large models)
-torchrun --nproc_per_node=8 train.py --distributed fsdp
-```
-
-**FSDP** uses `MixedPrecision(param_dtype=bfloat16, reduce_dtype=float32)` and `ShardingStrategy.FULL_SHARD` with `BackwardPrefetch.BACKWARD_PRE` for optimal performance.
-
-The `NFNBlock` layers are automatically wrapped as FSDP units via `transformer_auto_wrap_policy`.
-
----
-
-*Philippe-Antoine Robert — 2026-05-03 07:22:48 UTC*

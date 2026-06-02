@@ -250,3 +250,99 @@ class KuramotoPhaseLayer(nn.Module):
         h_modulated = h + mod
 
         return h_modulated, theta
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase Goal Forcing (Forçage de Phase Causal)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PhaseGoalForcing(nn.Module):
+    """
+    Forçage de phase par but (goal-directed Kuramoto forcing).
+
+    Equation maitresse LEAC:
+        dθ/dt = ω + λ·sin(θ* − θ) + K·sin(θ̄ − θ)
+
+    Le but est encode comme un attracteur de phase θ*.
+    Le forçage pousse la dynamique vers la cible:
+        θ_forced = θ + λ_goal · sin(θ* − θ)
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        n_phases: int,
+        init_lambda: float = 0.2,
+        n_steps: int = 3,
+    ):
+        super().__init__()
+        self.n_phases = n_phases
+        self.n_steps = n_steps
+
+        from .hopfield import mandelbrot_frequencies
+        freqs = mandelbrot_frequencies(n_phases)
+        base = torch.tensor(freqs[:n_phases], dtype=torch.float32) if not isinstance(freqs, torch.Tensor) else freqs[:n_phases].clone().float()
+        self.register_buffer("base_angles", base)
+
+        self.encoder = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.SiLU(),
+            nn.Linear(d_model // 2, n_phases),
+            nn.Tanh(),
+        )
+        nn.init.normal_(self.encoder[-2].weight, std=0.01)
+        nn.init.zeros_(self.encoder[-2].bias)
+
+        self.log_lambda = nn.Parameter(torch.tensor(math.log(init_lambda)))
+
+        self.goal_bias_proj = nn.Linear(n_phases, d_model, bias=False)
+        nn.init.normal_(self.goal_bias_proj.weight, std=0.01)
+
+        self._goal_phase: Optional[torch.Tensor] = None
+
+    @property
+    def lambda_goal(self) -> float:
+        return self.log_lambda.exp()
+
+    def set_goal(self, h_prompt: torch.Tensor):
+        """Encode le prompt comme attracteur de phase."""
+        summary = h_prompt.mean(1)
+        self._goal_phase = (self.base_angles.unsqueeze(0) + self.encoder(summary) * math.pi).detach()
+
+    def reset_goal(self):
+        self._goal_phase = None
+
+    def forward(
+        self,
+        theta: torch.Tensor,
+        h_context: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Applique le forçage de phase vers le but.
+        theta: [B, L, n_phases] or [B, n_phases]
+        Returns: (theta_forced, alignment_score)
+        """
+        if self._goal_phase is None:
+            return theta, torch.ones(theta.shape[:-1], device=theta.device)
+
+        goal = self._goal_phase
+        if goal.dim() < theta.dim():
+            goal = goal.unsqueeze(1)
+        lam = self.lambda_goal
+
+        for _ in range(self.n_steps):
+            forcing = lam * torch.sin(goal - theta)
+            theta = theta + forcing
+
+        alignment = torch.cos(theta - goal).mean(-1)
+        return theta, alignment
+
+    def loss_goal(self, theta: torch.Tensor) -> torch.Tensor:
+        """Perte d'alignement de phase vers le but."""
+        if self._goal_phase is None:
+            return torch.tensor(0.0, device=theta.device)
+        goal = self._goal_phase
+        if goal.dim() < theta.dim():
+            goal = goal.unsqueeze(1)
+        alignment = torch.cos(theta - goal).mean(-1)
+        return -alignment.mean()
