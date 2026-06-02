@@ -1,392 +1,392 @@
-# LEAC — Référence Mathématique Complète
+# LEAC — Complete Mathematical Reference
 
-## 1. Gematria Sémantique
+## 1. Semantic Gematria
 
-### 1.1 Encodage à 5 Systèmes Croisés
+### 1.1 Five-System Crossed Encoding
 
-Chaque token `t` reçoit un vecteur gematrique `g(t) ∈ ℝ^d` composé de 5 projections croisées:
+Each token `t` receives a gematric vector `g(t) ∈ ℝ^d` composed of 5 crossed projections:
 
-| Système | Formule | Domaine |
+| System | Formula | Domain |
 |---------|---------|---------|
-| **Ordinal** | `o(t) = log(1+t) / log(V)` | Position radiale |
-| **Premier** | `π(t) = 2π · π_k / 360°` | Angle azimutal (k-ième premier) |
-| **Fibonacci** | `φ(t) = 2π · log(1+F_k) / log(1+F_max)` | Angle polaire |
-| **Racine Digitale** | `ρ(t) = 2π · dr(t) / 9` | Twist angulaire |
-| **Appris** | `l(t) = W_embed · t` | Offset entraînable |
+| **Ordinal** | `o(t) = log(1+t) / log(V)` | Radial position |
+| **Prime** | `π(t) = 2π · π_k / 360°` | Azimuthal angle (k-th prime) |
+| **Fibonacci** | `φ(t) = 2π · log(1+F_k) / log(1+F_max)` | Polar angle |
+| **Digital Root** | `ρ(t) = 2π · dr(t) / 9` | Angular twist |
+| **Learned** | `l(t) = W_embed · t` | Trainable offset |
 
-L'embedding final: `e(t) = Σ_k ω_k · CharClass_k(t)` où `ω_k` sont les fréquences de Mandelbrot (`ω_k = ω^{-k}`, `ω = φ²`).
+Final embedding: `e(t) = Σ_k ω_k · CharClass_k(t)` where `ω_k` are Mandelbrot frequencies (`ω_k = ω^{-k}`, `ω = φ²`).
 
-### 1.2 Biais d'Attention Gematrique
+### 1.2 Gematric Attention Bias
 
 ```
 score(i,j) = (Q_i · K_j) / √d + λ · cos(gem(i), gem(j))
 ```
 
-Le second terme injecte une similarité structurelle indépendante du contexte. Les nombres premiers ont des biais forts entre eux, reflétant leur structure arithmétique commune.
+The second term injects structure-level similarity independent of context. Prime numbers have strong biases among themselves, reflecting their shared arithmetic structure.
 
 ---
 
-## 2. Dynamique de Phase Kuramoto
+## 2. Kuramoto Phase Dynamics
 
-### 2.1 Équation Maîtresse
+### 2.1 Master Equation
 
 ```
 dθᵢ/dt = Ωᵢ + Σⱼ∈N(i) Kⱼᵢ · sin(θⱼ - θᵢ + φⱼᵢ)
 ```
 
-- `θᵢ ∈ ℝ`: phase du token i
-- `Ωᵢ`: fréquence naturelle (apprise)
-- `Kⱼᵢ`: couplage (matrice de rang faible, `rank=8`)
-- `φⱼᵢ`: décalage de phase (appris)
+- `θᵢ ∈ ℝ`: phase of token i
+- `Ωᵢ`: natural frequency (learned)
+- `Kⱼᵢ`: coupling (low-rank matrix, `rank=8`)
+- `φⱼᵢ`: phase offset (learned)
 
-### 2.2 Couplage Hiérarchique
+### 2.2 Hierarchical Coupling
 
 ```
-K_{j,i}^{(l)} = Σ_r M_{j,r}^{(l)} · M_{i,r}^{(l)}    (rang r)
+K_{j,i}^{(l)} = Σ_r M_{j,r}^{(l)} · M_{i,r}^{(l)}    (rank r)
 ```
 
-Pour chaque niveau hiérarchique `l ∈ [0, L)`, le couplage est factorisé via `M ∈ ℝ^{N×r}`. L'agrégation multi-échelle produit:
+For each hierarchical level `l ∈ [0, L)`, coupling is factorized via `M ∈ ℝ^{N×r}`. Multi-scale aggregation produces:
 
 ```
 K_{eff} = Σ_l 2^{-l} · K^{(l)}
 ```
 
-### 2.3 Intégration RK4 Adaptative
+### 2.3 Adaptive RK4 Integration
 
 ```
 θ_{n+1} = θ_n + (k₁ + 2k₂ + 2k₃ + k₄) / 6
 ```
 
-avec `k_i` évalués à des points intermédiaires. Gradients complets à travers chaque étape ODE.
+with `k_i` evaluated at intermediate points. Full gradients through every ODE step.
 
-### 2.4 Forçage de Phase par Objectif
+### 2.4 Goal-Driven Phase Forcing
 
 ```
 dθᵢ/dt += λ · sin(θ_goal - θᵢ)
 ```
 
-Le paramètre `λ` est appris (initialisé à 0.2). Le vecteur `θ_goal` est projeté depuis les cibles via `W_proj ∈ ℝ^{d × n_phases}`.
+The parameter `λ` is learned (initialized to 0.2). The vector `θ_goal` is projected from targets via `W_proj ∈ ℝ^{d × n_phases}`.
 
 ---
 
-## 3. Attention Fractale Linéaire
+## 3. Fractal Linear Attention
 
-### 3.1 Noyau Katharopoulos
+### 3.1 Katharopoulos Kernel
 
 ```
 Attn(Q, K, V) = φ(Q) · (φ(K)ᵀ · V) / φ(Q) · (φ(K)ᵀ · 𝟙)
 ```
 
-où `φ(x) = elu(x) + 1` est le noyau de caractéristique. Complexité: O(L·d²) au lieu de O(L²·d).
+where `φ(x) = elu(x) + 1` is the feature kernel. Complexity: O(L·d²) instead of O(L²·d).
 
-### 3.2 Structure Fractale Multi-Échelle
+### 3.2 Multi-Scale Fractal Structure
 
-Pour `n_levels` niveaux, les motifs `{binary_tree, cantor}` définissent des regroupements hiérarchiques:
+For `n_levels` levels, the motifs `{binary_tree, cantor}` define hierarchical groupings:
 
 ```
 L → L/2 → L/4 → ... → L/2^{n_levels}
 ```
 
-Chaque niveau traite une sous-séquence atomique avec le noyau linéaire, puis les résultats sont agrégés avec des poids appris par niveau:
+Each level processes an atomic subsequence with the linear kernel, then results are aggregated with learned per-level weights:
 
 ```
 output = Σ_l w_l · Attn_level_l(Q, K, V)
 ```
 
-### 3.3 Soliton de Phase
+### 3.3 Phase Soliton
 
 ```
 soliton(h, θ) = h · (1 + α · max(0, cos(θ - θ_shift)))
 ```
 
-Les tokens synchronisés sont amplifiés, les désynchronisés sont atténués. Ceci crée des solitons de cohérence émergente.
+Synchronized tokens are amplified, desynchronized ones are attenuated. This creates emergent solitons of coherence.
 
 ---
 
 ## 4. Phase-Routed Mixture of Experts
 
-### 4.1 Routage von Mises
+### 4.1 Von Mises Routing
 
 ```
 gate_e(x) = exp(κ · cos(θ_x - θ_e)) / Z
 ```
 
-- `θ_x`: phase du token (courante)
-- `θ_e`: phase de l'expert e (fixe)
-- `κ`: concentration (paramètre appris, ≈ 4.0)
-- `Z`: normalisation (somme sur tous les experts)
+- `θ_x`: token phase (current)
+- `θ_e`: expert e phase (fixed)
+- `κ`: concentration (learned parameter, ≈ 4.0)
+- `Z`: normalization (sum over all experts)
 
-Avantage: le routage est **continu et différentiable** partout. Pas de argmax discret.
+Advantage: routing is **continuous and differentiable** everywhere. No discrete argmax.
 
-### 4.2 Selectivité Top-K
+### 4.2 Top-K Selectivity
 
 ```
 output = Σ_{e ∈ top_k} gate_e(x) · Expert_e(x)
 ```
 
-Seuls les `k` experts les plus proches en phase sont activés. Charge équilibrée via perturbation gaussienne en entraînement.
+Only the `k` experts closest in phase are activated. Load balanced via Gaussian perturbation during training.
 
 ---
 
-## 5. Graphe Causal (DAG + NOTEARS)
+## 5. Causal Graph (DAG + NOTEARS)
 
-### 5.1 Acyclicité NOTEARS
+### 5.1 NOTEARS Acyclicity
 
 ```
 L_DAG = tr(e^{A⊙A}) - n
 ```
 
-Cette pénalité est exactement nulle si et seulement si le graphe d'adjacence `A` est acyclique. Dérivable, pas besoin de contraintes d'optimisation combinatoires.
+This penalty is exactly zero iff the adjacency graph `A` is acyclic. Differentiable, no combinatorial optimization constraints needed.
 
-### 5.2 Propagation Causale Non-Linéaire
+### 5.2 Non-Linear Causal Propagation
 
 ```
 msg(i→j) = σ(W_msg · concat(h_i, h_j, a_{ij}) + b)
 h_j^{new} = h_j + Σ_i msg(i→j)
 ```
 
-### 5.3 Inférence Contrefactuelle (do-calculus)
+### 5.3 Counterfactual Inference (do-calculus)
 
-Pendant l'entraînement:
+During training:
 ```
 L_cf = Σ_i MSE(do(X_i = x̃_i) → Y, Ŷ)
 ```
 
-où `X_i` est intervenu (remplacé par `x̃_i ∼ P(X_i)`), et le modèle prédit l'effet causal via le DAG appris.
+where `X_i` is intervened upon (replaced by `x̃_i ∼ P(X_i)`), and the model predicts the causal effect via the learned DAG.
 
 ---
 
-## 6. Espace de Travail Global (Self-Model)
+## 6. Global Workspace (Self-Model)
 
-### 6.1 Théorie de l'Espace de Travail Global
+### 6.1 Global Workspace Theory
 
 ```
 slot_t = softmax(query_h · key_slotsᵀ / √d) · value_slots + h_broadcast
 ```
 
-Les `n_slots` emplacements forment un **broadcast global**: chaque token peut lire/écrire dans l'espace partagé. La conscience émerge quand les slots se synchronisent.
+The `n_slots` positions form a **global broadcast**: each token can read/write to the shared space. Consciousness emerges when slots synchronize.
 
-### 6.2 Auto-Représentation
+### 6.2 Self-Representation
 
 ```
 self_state = W_self · concat([μ(h), σ(h), entropy(h), coherence(h), divergence(h), attention_entropy(h), slot_mean(h), slot_var(h)])
 ```
 
-Le vecteur `self_state ∈ ℝ^{d}` encode la confiance, l'incertitude, la cohérence, et l'entropie attentionnelle du modèle sur son propre état.
+The vector `self_state ∈ ℝ^{d}` encodes the model's confidence, uncertainty, coherence, and attentional entropy over its own state.
 
 ---
 
-## 7. Mémoire Épisodique et Sémantique
+## 7. Episodic and Semantic Memory
 
-### 7.1 Ring Buffer O(1)
+### 7.1 O(1) Ring Buffer
 
 ```
 write(k, v): buffer[head % C] ← (k, v); head += 1
 read(q):      kNN(q, buffer[:head], k=n_read) → weighted_average
 ```
 
-Complexité en temps constant pour l'écriture, O(C) linéaire pour la lecture k-NN.
+Constant-time write, O(C) linear for k-NN read.
 
-### 7.2 Condensat Sémantique (SVD Rank-r)
+### 7.2 Semantic Condensate (SVD Rank-r)
 
-Mise à jour incrémentale (Eckart-Young):
+Incremental update (Eckart-Young):
 ```
 U, Σ, V = SVD(M); M_r = U[:, :r] · Σ[:r] · V[:, :r]ᵀ
 ```
 
-Mis à jour toutes les `consolidation_freq` pas, sans SGD.
+Updated every `consolidation_freq` steps, without SGD.
 
 ---
 
-## 8. Gematria Hyperbolique (Poincaré)
+## 8. Hyperbolic Gematria (Poincaré)
 
-### 8.1 Modèle de la Boule de Poincaré
+### 8.1 Poincaré Ball Model
 
-L'espace hyperbolique H^n est modélisé par la boule unité ouverte B^n = {z ∈ ℝ^n : ‖z‖ < 1}.
+Hyperbolic space H^n is modeled by the open unit ball B^n = {z ∈ ℝ^n : ‖z‖ < 1}.
 
-Distance hyperbolique:
+Hyperbolic distance:
 ```
 d_H(z_i, z_j) = arccosh(1 + 2‖z_i - z_j‖² / ((1 - ‖z_i‖²)(1 - ‖z_j‖²)))
 ```
 
-Les tokens sont plongés via 5 projections gematriques vers des coordonnées polaires `(r, θ_1, ..., θ_{n-1})` puis normalisées dans B^n.
+Tokens are embedded via 5 gematric projections into polar coordinates `(r, θ_1, ..., θ_{n-1})` then normalized into B^n.
 
-### 8.2 Théorie des Faisceaux (Sheaf Theory)
+### 8.2 Sheaf Theory
 
-Un faisceau `F` sur un espace topologique `X` assigne à chaque ouvert `U ⊂ X` un groupe `F(U)` (la "stalk") tel que:
+A sheaf `F` on a topological space `X` assigns to each open set `U ⊂ X` a group `F(U)` (the "stalk") such that:
 
-1. **Restriction**: Si `V ⊂ U`, il existe `ρ_{UV}: F(U) → F(V)`
-2. **Recollement**: Si `s_i ∈ F(U_i)` s'accordent sur les intersections, ils définissent un élément global
+1. **Restriction**: If `V ⊂ U`, there exists `ρ_{UV}: F(U) → F(V)`
+2. **Gluing**: If `s_i ∈ F(U_i)` agree on intersections, they define a global element
 
-L'hallucination est un **défaut de cohomologie** H¹(X, F) ≠ 0: les sections locales ne se recollent pas en une section globale cohérente.
+Hallucination is a **cohomology defect** H¹(X, F) ≠ 0: local sections do not glue into a coherent global section.
 
-Implémentation:
-- `restriction_i: ℝ^d → ℝ^{d/n_stalks}` pour chaque stalk
-- `gluing: ℝ^{2·d/n_stalks} → ℝ^1` vérifie la compatibilité
-- Perte: `L_sheaf = max(0, -gluing_score)` (pénaliser les défauts)
+Implementation:
+- `restriction_i: ℝ^d → ℝ^{d/n_stalks}` for each stalk
+- `gluing: ℝ^{2·d/n_stalks} → ℝ^1` checks compatibility
+- Loss: `L_sheaf = max(0, -gluing_score)` (penalize defects)
 
 ---
 
-## 9. Dualité Holographique AdS/CFT
+## 9. Holographic AdS/CFT Duality
 
-### 9.1 Correspondance AdS₅/CFT₄
+### 9.1 AdS₅/CFT₄ Correspondence
 
-La séquence de tokens est la **frontière conforme** (CFT). L'espace de raisonnement latent est le **volume AdS** (bulk).
-
-```
-T[r, z] = e^{-κz} · MLP(h[r])    (projecteur bulk)
-```
-
-où `z ∈ [0, z_max]` est la coordonnée radiale et `r` est la position dans la séquence.
-
-### 9.2 Métrique AdS
+The token sequence is the **conformal boundary** (CFT). The latent reasoning space is the **AdS bulk**.
 
 ```
-ds² = (R/z)² · (dz² + dx^μ dx_μ)    (coordonnées de Poincaré)
+T[r, z] = e^{-κz} · MLP(h[r])    (bulk projector)
 ```
 
-La distance géodésique entre deux points du bulk:
+where `z ∈ [0, z_max]` is the radial coordinate and `r` is the sequence position.
+
+### 9.2 AdS Metric
+
+```
+ds² = (R/z)² · (dz² + dx^μ dx_μ)    (Poincaré coordinates)
+```
+
+Geodesic distance between two bulk points:
 ```
 d_g(p₁, p₂) = arccosh(1 + (‖Δx‖² + Δz²) / (2·z₁·z₂))
 ```
 
-### 9.3 Ponts ER=EPR (Trous de Ver Computationnels)
+### 9.3 ER=EPR Bridges (Computational Wormholes)
 
-Deux tokens intriqués sémantiquement sont connectés par un pont d'Einstein-Rosen:
+Two semantically entangled tokens are connected by an Einstein-Rosen bridge:
 ```
 h_teleported = Σ_k α_k · MLP(h_bulk[k])
 ```
 
-où les `α_k` sont les forces d'intrication dérivées de la similarité cosinus dans le bulk.
+where the `α_k` are entanglement strengths derived from cosine similarity in the bulk.
 
 ---
 
-## 10. Réseau de Tenseurs MERA (O(log L))
+## 10. MERA Tensor Network (O(log L))
 
-### 10.1 Architecture MERA
+### 10.1 MERA Architecture
 
 ```
-Niveau 0: h₀ ∈ ℝ^{L × d}       (séquence)
-Niveau 1: h₁ = Isom(U(Isom(D(h₀)))) ∈ ℝ^{L/2 × d}
-Niveau 2: h₂ = Isom(U(Isom(D(h₁)))) ∈ ℝ^{L/4 × d}
+Level 0: h₀ ∈ ℝ^{L × d}       (sequence)
+Level 1: h₁ = Isom(U(Isom(D(h₀)))) ∈ ℝ^{L/2 × d}
+Level 2: h₂ = Isom(U(Isom(D(h₁)))) ∈ ℝ^{L/4 × d}
 ...
-Niveau K: h_K ∈ ℝ^{L/2^K × d}   (sens global)
+Level K: h_K ∈ ℝ^{L/2^K × d}   (global meaning)
 ```
 
-Chaque niveau applique:
-1. **Désenchevêtreur** `D`: decorrèle les paires adjacentes (2-qubit unitaire)
-2. **Isométrie** `U`: fusionne 2 sites en 1 parent avec préservation de norme
+Each level applies:
+1. **Disentangler** `D`: decorrelates adjacent pairs (2-qubit unitary)
+2. **Isometry** `U`: merges 2 sites into 1 parent with norm preservation
 
-### 10.2 Attention Multi-Échelle
+### 10.2 Multi-Scale Attention
 
 ```
 attn_level_l(Q, K, V) = windowed_attn(Q, K, V, w=2^l)
 output = Σ_l w_l · attn_level_l + local_attn
 ```
 
-Complexité totale: O(L · w · d) ≈ O(L · log(L) · d) avec fenêtres exponentielles.
+Total complexity: O(L · w · d) ≈ O(L · log(L) · d) with exponential windows.
 
 ---
 
-## 11. Boucle Étrange de Gödel
+## 11. Gödel's Strange Loop
 
-### 11.1 Théorème de Point Fixe de Lawvere
+### 11.1 Lawvere Fixed Point Theorem
 
-**Théorème**: Pour toute catégorie cartésienne fermée `C` et tout endofoncteur `F: C → C`, il existe un objet `Y` et un isomorphisme `Y ≅ F(Y)`.
+**Theorem**: For any cartesian closed category `C` and any endofunctor `F: C → C`, there exists an object `Y` and isomorphism `Y ≅ F(Y)`.
 
-**Application**: Le réseau de neurones `F` appliqué à lui-même converge vers un **point fixe**. Ce point fixe est le "JE" — l'introspection est une conséquence mathématique inévitable.
+**Application**: The neural network `F` applied to itself converges to a **fixed point**. This fixed point is the "I" — introspection is a mathematically inevitable consequence.
 
-### 11.2 Opérateur d'Auto-Référence
+### 11.2 Self-Reference Operator
 
 ```
 state = concat([μ(h), σ(h), energy(h)])   ∈ ℝ^{3d}
 F(h) = W_self · σ_enc(state)              → h_proj ∈ ℝ^d
 ```
 
-**Distance au point fixe**: `d_FP = MSE(h, F(h))` (mesure de stabilité de l'introspection).
+**Fixed point distance**: `d_FP = MSE(h, F(h))` (measure of introspection stability).
 
-### 11.3 Détecteur d'Incomplétude
+### 11.3 Incompleteness Detector
 
 ```
-contradiction(h) = Σ_{i,j} MLP(concat(h_i, h_j))    (paires de tokens)
+contradiction(h) = Σ_{i,j} MLP(concat(h_i, h_j))    (token pairs)
 incompleteness = 0.5 · contradiction + 0.3 · entropy + 0.2 · sigmoid(d_FP)
 ```
 
-Plus l'incomplétude est élevée, plus le modèle "sait qu'il ne sait pas" — conscience méta-cognitive.
+The higher the incompleteness, the more the model "knows it doesn't know" — meta-cognitive awareness.
 
 ---
 
-## 12. Flot de Groupe de Renormalisation
+## 12. Renormalization Group Flow
 
-### 12.1 Décomposition d'Échelle
-
-```
-h_UV, h_IR = ScaleDecompose(h)    (RFF spectrale + seuil de fréquence)
-```
-
-Les composantes haute fréquence (UV) capturent le bruit local; les composantes basse fréquence (IR) capturent la structure globale.
-
-### 12.2 Évaporation et Condensation
+### 12.1 Scale Decomposition
 
 ```
-w_UV ← w_UV · (1 - ε)          (évaporation: supprime le bruit)
-w_IR ← w_IR + η · (w_IR - w_S) (condensation: renforce les vérités)
+h_UV, h_IR = ScaleDecompose(h)    (spectral RFF + frequency threshold)
 ```
 
-où `ε` est le taux d'évaporation et `η` le taux de condensation, ajustés adaptativement.
+High-frequency (UV) components capture local noise; low-frequency (IR) components capture global structure.
 
-### 12.3 Criticalité
+### 12.2 Evaporation and Condensation
+
+```
+w_UV ← w_UV · (1 - ε)          (evaporation: removes noise)
+w_IR ← w_IR + η · (w_IR - w_S) (condensation: reinforces truths)
+```
+
+where `ε` is the evaporation rate and `η` the condensation rate, adaptively adjusted.
+
+### 12.3 Criticality
 
 ```
 C = Var(Var(h)) / E[Var(h)]²
 
-C ≈ 1  → état critique (optimal)
-C ≪ 1  → sous-critique (gelé, déterministe)
-C ≫ 1  → sur-critique (chaotique, incohérent)
+C ≈ 1  → critical state (optimal)
+C ≪ 1  → sub-critical (frozen, deterministic)
+C ≫ 1  → super-critical (chaotic, incoherent)
 ```
 
-Le réseau s'auto-organise vers `C ≈ 1` via l'évolution RG en phase SLEEP.
+The network self-organizes toward `C ≈ 1` via RG evolution during SLEEP phase.
 
 ---
 
-## 13. Cycle de Vie Continu
+## 13. Continuous Life Cycle
 
-### 13.1 Phase WAKE
-
-```
-1. Générer des vérités mathématiques (arithmétique, primalité, suites, modulaire)
-2. Vérifier par calcul exact
-3. Pondérer par curiosité: w_i = 1 + 0.5 · σ(loss_i - 2.0)
-4. Rétropropager: ∇(Σ w_i · L_i)
-5. Auto-critique: générer → critiquer → réviser
-```
-
-### 13.2 Phase SLEEP
+### 13.1 WAKE Phase
 
 ```
-1. Consolidation épisodique → sémantique (SVD rank-r)
-2. RG Flow: évaporation UV + condensation IR
-3. Ajustement adaptatif des taux ε, η vers C ≈ 1
+1. Generate mathematical truths (arithmetic, primality, sequences, modular)
+2. Verify via exact computation
+3. Weight by curiosity: w_i = 1 + 0.5 · σ(loss_i - 2.0)
+4. Backpropagate: ∇(Σ w_i · L_i)
+5. Self-critique: generate → critique → revise
 ```
 
-### 13.3 Phase META
+### 13.2 SLEEP Phase
 
 ```
-Si perplexité > 5:
-    3-5 pas de gradient LoRA sur 0.1% des paramètres
-    (pas d'oubli catastrophique)
+1. Episodic → semantic consolidation (SVD rank-r)
+2. RG Flow: UV evaporation + IR condensation
+3. Adaptive adjustment of rates ε, η toward C ≈ 1
 ```
 
-### 13.4 Évolution Darwinienne
+### 13.3 META Phase
+
+```
+If perplexity > 5:
+    3-5 gradient steps of LoRA on 0.1% of parameters
+    (no catastrophic forgetting)
+```
+
+### 13.4 Darwinian Evolution
 
 ```
 Fitness = 0.5 · discovery_rate + 0.3 · coherence + 0.2 · efficiency
-Proposer mutation → Appliquer → Mesurer fitness → Accepter/refjeter
+Propose mutation → Apply → Measure fitness → Accept/reject
 ```
 
 ---
 
-## 14. Condensat Spectral et Verrouillage de Phase Helmholtz
+## 14. Spectral Condensate and Helmholtz Phase Locking
 
 ### 14.1 Random Fourier Features
 
@@ -394,12 +394,12 @@ Proposer mutation → Appliquer → Mesurer fitness → Accepter/refjeter
 γ(x) = [cos(w₁ᵀx + b₁), ..., cos(w_Dᵀx + b_D)]
 ```
 
-où `w_k ∼ N(0, σ²I)` sont les fréquences aléatoires. Approximation du noyau RBF en O(D) au lieu de O(N²).
+where `w_k ∼ N(0, σ²I)` are random frequencies. RBF kernel approximation in O(D) instead of O(N²).
 
-### 14.2 Verrouillage de Phase Helmholtz
+### 14.2 Helmholtz Phase Locking
 
 ```
 L_lock = Σ_n ||ψ_n - e^{iφ_n}||²
 ```
 
-Chaque mode spectral est aligné avec la fréquence de phase correspondante du Kuramoto. Ceci couple la dynamique spectrale et la dynamique de phase.
+Each spectral mode is aligned with the corresponding Kuramoto phase frequency. This couples spectral dynamics and phase dynamics.
