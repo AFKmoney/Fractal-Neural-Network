@@ -31,14 +31,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from nfn.config import NFNConfig
+from nfn.config import FNNConfig
 from nfn.connections import SinusoidalAggregator, SinusoidalGate
 
 
 class NFNLoss:
     """Stateless loss helper — call .regularization() each forward pass."""
 
-    def __init__(self, cfg: NFNConfig):
+    def __init__(self, cfg: FNNConfig):
         self.cfg = cfg
 
     # ── Phase smoothness ─────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ class AGILoss:
         loss.backward()
     """
 
-    def __init__(self, cfg: NFNConfig):
+    def __init__(self, cfg: FNNConfig):
         self.cfg = cfg
         # Running EMA of per-signal losses for adaptive weighting
         self._ema: Dict[str, float] = {}

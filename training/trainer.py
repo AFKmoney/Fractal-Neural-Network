@@ -26,8 +26,8 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
-from nfn.config import NFNConfig
-from nfn.network import NFNLanguageModel
+from nfn.config import FNNConfig
+from nfn.model import FNNModel
 from nfn.tokenizer import NFNTokenizer
 from training.losses import NFNLoss
 
@@ -96,9 +96,9 @@ class NFNTrainer:
 
     Parameters
     ----------
-    model        : NFNLanguageModel
+    model        : FNNModel
     tokenizer    : NFNTokenizer
-    cfg          : NFNConfig
+    cfg          : FNNConfig
     lr           : learning rate (default 3e-4)
     weight_decay : AdamW weight decay
     max_grad_norm: gradient clipping
@@ -109,9 +109,9 @@ class NFNTrainer:
 
     def __init__(
         self,
-        model: NFNLanguageModel,
+        model: FNNModel,
         tokenizer: NFNTokenizer,
-        cfg: Optional[NFNConfig] = None,
+        cfg: Optional[FNNConfig] = None,
         lr: float = 3e-4,
         weight_decay: float = 0.1,
         max_grad_norm: float = 1.0,
@@ -177,7 +177,7 @@ class NFNTrainer:
         from torch.utils.checkpoint import checkpoint as torch_checkpoint
 
         for module in self.model.modules():
-            if module.__class__.__name__ == "NFNBlock":
+            if module.__class__.__name__ == "FNNBlock":
                 original_forward = module.forward
 
                 def _make_checkpointed(orig, mod):
@@ -211,11 +211,11 @@ class NFNTrainer:
         if device is None:
             device = torch.device("cpu")
         ckpt = torch.load(path, map_location=device)
-        from nfn.config import NFNConfig
-        from nfn.network import NFNLanguageModel
+        from nfn.config import FNNConfig
+        from nfn.model import FNNModel
         from nfn.tokenizer import NFNTokenizer
-        cfg = NFNConfig.from_dict(ckpt["cfg"])
-        model = NFNLanguageModel(cfg).to(device)
+        cfg = FNNConfig.from_dict(ckpt["cfg"])
+        model = FNNModel(cfg).to(device)
         model.load_state_dict(ckpt["model_state"])
         tokenizer = NFNTokenizer()
         trainer = cls(model, tokenizer, cfg)
@@ -241,8 +241,7 @@ class NFNTrainer:
             is_last = (i == accum - 1)
             with torch.autocast(device_type=device_type, dtype=self.dtype,
                                 enabled=(self.dtype != torch.float32)):
-                logits, aux = self.model(batch["input_ids"], targets=batch["targets"])
-                losses = aux["loss_aux"]
+                logits, losses = self.model(batch["input_ids"], targets=batch["targets"])
                 loss = losses["total"] / accum  # scale for accumulation
 
             self.scaler.scale(loss).backward()
@@ -260,9 +259,9 @@ class NFNTrainer:
         self.optimizer.zero_grad(set_to_none=True)
 
         return {
-            "loss": accum_metrics.get("task", total_loss / accum),
+            "loss": accum_metrics.get("lm", total_loss / accum),
             "loss_total": total_loss / accum,
-            "loss_phase": accum_metrics.get("phase", 0.0),
+            "loss_phase": accum_metrics.get("phase_coherence", 0.0),
             "loss_freq": accum_metrics.get("freq", 0.0),
             "loss_spectral": accum_metrics.get("spectral", 0.0),
             "grad_norm": grad_norm.item() if torch.is_tensor(grad_norm) else float(grad_norm),

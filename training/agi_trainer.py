@@ -1,7 +1,7 @@
 """
 NFN AGI Trainer v5.0
 
-Training system for AGINFNModel that goes beyond standard next-token prediction.
+Training system for FNNModel that goes beyond standard next-token prediction.
 
 Core features:
   1. Multi-objective loss with curriculum ramp (LM → all AGI losses)
@@ -28,10 +28,10 @@ import torch.nn.functional as F
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 
-from nfn.config import NFNConfig
-from nfn.agi_model import AGINFNModel, build_agi_model
+from nfn.config import FNNConfig
+from nfn.model import FNNModel, build_fnn_model
 from nfn.tokenizer import NFNTokenizer
-from nfn.online_learner import OnlineLearner
+from training.online_learner import OnlineLearner
 from training.losses import AGILoss
 
 
@@ -202,7 +202,7 @@ class CuriosityWeighter:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _sequence_log_prob(
-    model:  AGINFNModel,
+    model:  FNNModel,
     ids:    torch.Tensor,   # [1, L]
     pad_id: int = 0,
 ) -> torch.Tensor:
@@ -259,7 +259,7 @@ def cosine_with_warmup(
 
 class AGITrainer:
     """
-    Full AGINFNModel trainer with genuine AGI-specific training features.
+    Full FNNModel trainer with genuine AGI-specific training features.
 
     Training loop (per optimizer step):
       1. WAKE forward (write_memory=True) + curiosity-weighted AGI loss
@@ -276,9 +276,9 @@ class AGITrainer:
 
     def __init__(
         self,
-        model:          AGINFNModel,
+        model:          FNNModel,
         tokenizer:      NFNTokenizer,
-        cfg:            Optional[NFNConfig] = None,
+        cfg:            Optional[FNNConfig] = None,
         lr:             float = 3e-4,
         weight_decay:   float = 0.1,
         max_grad_norm:  float = 1.0,
@@ -687,8 +687,8 @@ class AGITrainer:
     def load(cls, path: str, device: Optional[torch.device] = None) -> "AGITrainer":
         device = device or torch.device("cpu")
         ckpt   = torch.load(path, map_location=device, weights_only=False)
-        cfg    = NFNConfig.from_dict(ckpt["cfg"])
-        model  = build_agi_model(
+        cfg    = FNNConfig.from_dict(ckpt["cfg"])
+        model  = build_fnn_model(
             vocab_size            = cfg.vocab_size,
             d_model               = cfg.d_model,
             n_blocks              = cfg.n_blocks,

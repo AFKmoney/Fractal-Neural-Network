@@ -100,11 +100,11 @@ def wrap_fsdp(model: nn.Module, device: torch.device) -> nn.Module:
         from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
         import functools
 
-        # Auto-wrap NFNBlock layers
-        from nfn.network import NFNBlock
+        # Auto-wrap FNNBlock layers
+        from nfn.block import FNNBlock
         wrap_policy = functools.partial(
             transformer_auto_wrap_policy,
-            transformer_layer_cls={NFNBlock},
+            transformer_layer_cls={FNNBlock},
         )
 
         mp_policy = MixedPrecision(
