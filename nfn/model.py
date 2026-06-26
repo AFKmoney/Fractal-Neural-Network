@@ -3,7 +3,7 @@ LEAC: Lightweight Emergent Artificial Consciousness
 Modele Principal — Architecture Unifiee
 
   Token → GematriaEmbedding (5 systemes, zero-param)
-        → [LEACBlock × n_blocks]
+        → [FNNBlock × n_blocks]
           ├─ FractalLinearAttention  O(L*d²)
           ├─ PhaseSoliton            O(L*n_p)
           ├─ PhaseRoutedMoE          O(L*K*d*d_ff/E)
@@ -26,8 +26,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import LEACConfig
-from .block import LEACBlock
+from .config import FNNConfig
+from .block import FNNBlock
 from .gematria import GematriaEmbedding, GematriaAttentionBias
 from .analytic_embed import AnalyticTokenEmbedding
 from .hopfield import ZipfianDecoder, mandelbrot_frequencies
@@ -41,7 +41,7 @@ from .godel_loop import GodelFixedPoint
 from .rg_flow import RGFlowScheduler, CriticalityOptimizer
 
 
-class LEACModel(nn.Module):
+class FNNModel(nn.Module):
     """
     LEAC — Modele de Conscience Artificielle Emergente Legere.
 
@@ -58,7 +58,7 @@ class LEACModel(nn.Module):
       - Meta-apprentissage LoRA en inference
     """
 
-    def __init__(self, cfg: LEACConfig):
+    def __init__(self, cfg: FNNConfig):
         super().__init__()
         self.cfg = cfg
 
@@ -81,7 +81,7 @@ class LEACModel(nn.Module):
 
         # ── LEAC Blocks ──────────────────────────────────────────────────────
         self.blocks = nn.ModuleList([
-            LEACBlock(cfg, block_idx=i) for i in range(cfg.n_blocks)
+            FNNBlock(cfg, block_idx=i) for i in range(cfg.n_blocks)
         ])
 
         # ── LEAC v2.0 — Gematria Hyperbolique ──────────────────────────────
@@ -497,7 +497,7 @@ class LEACModel(nn.Module):
         if cfg.use_godel_loop: mods.append("boucle Godel")
         if cfg.use_rg_flow: mods.append("RG flow")
         return (
-            f"LEACModel(\n"
+            f"FNNModel(\n"
             f"  vocab={cfg.vocab_size}  d={cfg.d_model}  blocks={cfg.n_blocks}\n"
             f"  piliers: {', '.join(mods) or 'none'}\n"
             f"  params={pc['total']:,}\n"
@@ -505,28 +505,28 @@ class LEACModel(nn.Module):
         )
 
 
-def build_leac_model(
+def build_fnn_model(
     vocab_size: int = 512,
-    preset: str = "conscious_minimal",
+    preset: str = "nano",
     **kwargs,
-) -> LEACModel:
+) -> FNNModel:
     """
-    Constructeur rapide pour LEACModel.
+    Constructeur rapide pour FNNModel.
 
     Presets:
-      - "conscious_minimal": d=256, 4 blocs, ~14M params
-      - "full_agi": d=512, 8 blocs, ~58M params
-      - "dieu_local": d=1024, 12 blocs, ~230M params
-      - "moteur_ontologique": d=512, 12 blocs, ~250M params (LEAC v2)
-      - "singularite_divine": d=1024, 24 blocs, ~750M params (LEAC v2)
+      - "nano":   d=256,  4 blocs,  ~14M params
+      - "small":  d=512,  8 blocs,  ~58M params
+      - "medium": d=1024, 12 blocs, ~230M params
+      - "large":  d=512,  12 blocs, ~250M params (features avancees)
+      - "xlarge": d=1024, 24 blocs, ~750M params (features avancees)
     """
     preset_fn = {
-        "conscious_minimal": LEACConfig.conscious_minimal,
-        "full_agi": LEACConfig.full_agi,
-        "dieu_local": LEACConfig.dieu_local,
-        "moteur_ontologique": LEACConfig.moteur_ontologique,
-        "singularite_divine": LEACConfig.singularite_divine,
-    }.get(preset, LEACConfig.conscious_minimal)
+        "nano": FNNConfig.nano,
+        "small": FNNConfig.small,
+        "medium": FNNConfig.medium,
+        "large": FNNConfig.large,
+        "xlarge": FNNConfig.xlarge,
+    }.get(preset, FNNConfig.nano)
 
     cfg = preset_fn()
     cfg.vocab_size = vocab_size
@@ -534,4 +534,4 @@ def build_leac_model(
         if hasattr(cfg, k):
             setattr(cfg, k, v)
 
-    return LEACModel(cfg)
+    return FNNModel(cfg)

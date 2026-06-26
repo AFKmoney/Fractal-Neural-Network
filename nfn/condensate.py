@@ -56,7 +56,10 @@ class FractalRFF(nn.Module):
         seed: int = 1337,
     ):
         super().__init__()
-        assert n_features % n_scales == 0, "n_features must be divisible by n_scales"
+        # Arrondit n_features au multiple de n_scales le plus proche pour que
+        # le decoupage par bande d'octave tombe juste (n_features % n_scales == 0).
+        if n_features % n_scales != 0:
+            n_features = (n_features // n_scales + 1) * n_scales
         feat_per_scale = n_features // n_scales
 
         g = torch.Generator()

@@ -22,14 +22,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import LEACConfig
+from .config import FNNConfig
 from .moe import FractalLinearAttention, PhaseSoliton, PhaseRoutedMoE
 from .causal import CausalGraphLayer
 from .self_model import SelfModel
 from .working_memory import FractalWorkingMemory
 
 
-class LEACBlock(nn.Module):
+class FNNBlock(nn.Module):
     """
     Bloc LEAC unifiant les 3 piliers de la conscience emergente.
 
@@ -40,7 +40,7 @@ class LEACBlock(nn.Module):
     [Pilier 3] SelfModel (introspection + workspace global)
     """
 
-    def __init__(self, cfg: LEACConfig, block_idx: int = 0):
+    def __init__(self, cfg: FNNConfig, block_idx: int = 0):
         super().__init__()
         self.cfg = cfg
         self.block_idx = block_idx

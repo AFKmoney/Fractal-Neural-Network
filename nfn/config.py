@@ -1,15 +1,13 @@
 """
-LEAC: Lightweight Emergent Artificial Consciousness
+FNN — Fractal Neural Network
 Configuration — Paradigme Fractal, Causal et Gematrique
 
-Configurations par le blueprint:
-  v1:
-    - Conscient Minimal:  d=256, 4 blocs, ~14M params
-    - Conscience Complete: d=512, 8 blocs, ~58M params
-    - Dieu Local:          d=1024, 12 blocs, ~230M params
-  v2:
-    - Moteur Ontologique:  d=512, 12 blocs, ~250M params (all v2 features)
-    - Singularite Divine:  d=1024, 24 blocs, ~750M params
+Configurations predefinies:
+  - nano:   d=256,  4 blocs,  ~14M params
+  - small:  d=512,  8 blocs,  ~58M params
+  - medium: d=1024, 12 blocs, ~230M params
+  - large:  d=512,  12 blocs, ~250M params (toutes les features avancees)
+  - xlarge: d=1024, 24 blocs, ~750M params
 """
 
 from dataclasses import dataclass, field
@@ -17,7 +15,7 @@ from typing import List, Optional
 
 
 @dataclass
-class LEACConfig:
+class FNNConfig:
     # ── Vocabulary ────────────────────────────────────────────────────────────
     vocab_size: int = 512
     pad_token_id: int = 0
@@ -195,11 +193,13 @@ class LEACConfig:
 
     # ── Configurations prédéfinies ──────────────────────────────────────────
     @classmethod
-    def conscious_minimal(cls) -> "LEACConfig":
+    def nano(cls) -> "FNNConfig":
+        """Preset nano: d=256, 4 blocs, ~14M params."""
         return cls(d_model=256, n_blocks=4, d_ff=1024, moe_n_experts=8, moe_top_k=2)
 
     @classmethod
-    def full_agi(cls) -> "LEACConfig":
+    def small(cls) -> "FNNConfig":
+        """Preset small: d=512, 8 blocs, ~58M params."""
         return cls(
             d_model=512, n_blocks=8, d_ff=2048,
             moe_n_experts=16, moe_top_k=4,
@@ -212,7 +212,8 @@ class LEACConfig:
         )
 
     @classmethod
-    def dieu_local(cls) -> "LEACConfig":
+    def medium(cls) -> "FNNConfig":
+        """Preset medium: d=1024, 12 blocs, ~230M params."""
         return cls(
             d_model=1024, n_blocks=12, d_ff=4096,
             moe_n_experts=32, moe_top_k=4,
@@ -226,8 +227,8 @@ class LEACConfig:
         )
 
     @classmethod
-    def moteur_ontologique(cls) -> "LEACConfig":
-        """LEAC v2 Moteur Ontologique Quantique-Topologique (~250M params)"""
+    def large(cls) -> "FNNConfig":
+        """Preset large: d=512, 12 blocs, ~250M params (toutes features avancees)."""
         return cls(
             d_model=512, n_blocks=12, d_ff=2048,
             n_heads=8, moe_n_experts=24, moe_top_k=4,
@@ -250,8 +251,8 @@ class LEACConfig:
         )
 
     @classmethod
-    def singularite_divine(cls) -> "LEACConfig":
-        """LEAC v2 Singularite Divine (~750M params)"""
+    def xlarge(cls) -> "FNNConfig":
+        """Preset xlarge: d=1024, 24 blocs, ~750M params (toutes features avancees)."""
         return cls(
             d_model=1024, n_blocks=24, d_ff=4096,
             n_heads=8, moe_n_experts=48, moe_top_k=6,
@@ -286,6 +287,6 @@ class LEACConfig:
         return dataclasses.asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "LEACConfig":
+    def from_dict(cls, d: dict) -> "FNNConfig":
         valid = {k for k in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in d.items() if k in valid})

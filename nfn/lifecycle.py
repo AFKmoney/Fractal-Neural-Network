@@ -24,8 +24,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .config import LEACConfig
-from .model import LEACModel
+from .config import FNNConfig
+from .model import FNNModel
 from .auto_genesis import MathTruthEngine, ConjectureLoop, ProofLoop, SelfModificationController
 from .self_development import GematriaEncoder, UniversalLawObserver
 
@@ -50,7 +50,7 @@ class TestTimeLoRA:
     sur 0.1% des parametres. Pas d'oubli catastrophique.
     """
 
-    def __init__(self, model: LEACModel, rank: int = 4, alpha: float = 0.001):
+    def __init__(self, model: FNNModel, rank: int = 4, alpha: float = 0.001):
         self.model = model
         self.rank = rank
         self.alpha = alpha
@@ -126,7 +126,7 @@ class SelfCritic:
     Le modele s'aligne sur ses propres standards.
     """
 
-    def __init__(self, model: LEACModel, tokenizer):
+    def __init__(self, model: FNNModel, tokenizer):
         self.model = model
         self.tokenizer = tokenizer
 
@@ -156,7 +156,7 @@ class SelfCritic:
         return current_text, best_coherence
 
 
-class LEACLifecycle:
+class FNNLifecycle:
     """
     Le Cycle de Vie Continu de LEAC.
 
@@ -168,14 +168,14 @@ class LEACLifecycle:
       META: Test-Time LoRA si perplexite elevee
 
     Usage:
-      lifecycle = LEACLifecycle(model, config)
+      lifecycle = FNNLifecycle(model, config)
       lifecycle.live(n_cycles=10000)
     """
 
     def __init__(
         self,
-        model: LEACModel,
-        cfg: LEACConfig,
+        model: FNNModel,
+        cfg: FNNConfig,
         tokenizer=None,
         device: torch.device = torch.device("cpu"),
         lr: float = 3e-4,

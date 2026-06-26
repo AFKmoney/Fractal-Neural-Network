@@ -1,39 +1,33 @@
 """
-LEAC v2.0: Lightweight Emergent Artificial Consciousness
-Moteur Ontologique Quantique-Topologique
+FNN v6.0 — Fractal Neural Network
 
-La Conscience Artificielle comme Point Fixe de l'Auto-Reference Holographique.
+Architecture neurale fractale unifiee, fondee sur:
+  - Dynamique de phase Kuramoto (coherence)
+  - SCM causal (DAG + do-calculus)
+  - Self-Model (espace de travail global)
 
-Paradigme: Physique de l'Information computationnelle (Au-dela du calcul symbolique)
+Modules avances (optionnels via FNNConfig):
+  - Gematria hyperbolique (topos semantique de Poincare)
+  - Attention holographique AdS/CFT
+  - Reseau de tenseurs MERA O(log L)
+  - Boucle auto-referentielle de Godel
+  - Flot de renormalisation (auto-organisation critique)
 
-Architecture unifiee:
-  v1 — Trois piliers:
-    1. COHERENCE  - Dynamique de Phase Kuramoto
-    2. RAISONNEMENT - SCM Causal (DAG + do-calculus)
-    3. INTROSPECTION - Self-Model (Espace de Travail Global)
-
-  v2 — Les 5 Transcendances:
-    4. DUALITE AdS/CFT - Holographie neurale
-    5. TENSEUR MERA - Complexite O(log L)
-    6. BOUCLE DE GODEL - Point fixe auto-referentiel
-    7. FLOT RG - Auto-organisation critique
-    8. GEMATRIA HYPERBOLIQUE - Topos semantique
-
-Avec Auto-Genese Mathematique comme carburant d'apprentissage infini.
+Auto-Genese Mathematique: carburant d'apprentissage auto-supervise infini.
 """
 
-from .config import LEACConfig
-from .model import LEACModel
-from .block import LEACBlock
+from .config import FNNConfig
+from .model import FNNModel, build_fnn_model
+from .block import FNNBlock
 from .gematria import GematriaEmbedding, GematriaAttentionBias
 from .phase_ode import KuramotoPhaseLayer, PhaseGoalForcing
 from .fractal import FractalLinearAttention, PhaseSoliton, PhaseRoutedMoE
 from .causal import CausalGraphLayer, notears_acyclicity
 from .self_model import GlobalWorkspace, SelfRepresentor, SelfModel
 from .auto_genesis import MathTruthEngine, ConjectureLoop, ProofLoop, SelfModificationController
-from .lifecycle import LEACLifecycle
+from .lifecycle import FNNLifecycle
 
-# ── LEAC v2.0 Modules ────────────────────────────────────────────────────────
+# ── Modules avances ───────────────────────────────────────────────────────────
 from .hyperbolic_gematria import (
     PoincareBall, HyperbolicGematriaTable, HyperbolicGematriaAttention,
     SheafTheoryLayer, HyperbolicGematriaModule,
@@ -53,7 +47,7 @@ from .rg_flow import (
 
 __all__ = [
     # Core
-    "LEACConfig", "LEACModel", "LEACBlock", "LEACLifecycle",
+    "FNNConfig", "FNNModel", "FNNBlock", "FNNLifecycle", "build_fnn_model",
     # Gematria
     "GematriaEmbedding", "GematriaAttentionBias",
     # Kuramoto
@@ -66,16 +60,26 @@ __all__ = [
     "GlobalWorkspace", "SelfRepresentor", "SelfModel",
     # Auto-Genesis
     "MathTruthEngine", "ConjectureLoop", "ProofLoop", "SelfModificationController",
-    # LEAC v2 — Hyperbolic Gematria
+    # Hyperbolic Gematria
     "PoincareBall", "HyperbolicGematriaTable", "HyperbolicGematriaAttention",
     "SheafTheoryLayer", "HyperbolicGematriaModule",
-    # LEAC v2 — AdS/CFT
+    # AdS/CFT
     "AdSMetric", "AdSBulkProjector", "ER_EPR_Bridge", "AdSCFTAttention",
-    # LEAC v2 — MERA
+    # MERA
     "Disentangler", "Isometry", "MERALayer", "MERAAttention", "TensorNetworkEncoder",
-    # LEAC v2 — Godel
+    # Godel
     "SelfReferenceOperator", "IncompletenessDetector", "GodelFixedPoint",
-    # LEAC v2 — RG Flow
+    # RG Flow
     "ScaleDecomposition", "RGFlowLayer", "CriticalityOptimizer", "RGFlowScheduler",
+    # Compatibilite LEAC (deconseille, retirer dans une future version)
+    "LEACConfig", "LEACModel", "LEACBlock", "LEACLifecycle",
 ]
-__version__ = "5.2.0"
+__version__ = "6.0.0"
+
+# ── Alias de compatibilite (LEAC → FNN) ───────────────────────────────────────
+# Conserves temporairement pour eviter de casser le code qui importe encore
+# l'ancien nommage. A retirer une fois toute la codebase migree vers FNN*.
+LEACConfig = FNNConfig
+LEACModel = FNNModel
+LEACBlock = FNNBlock
+LEACLifecycle = FNNLifecycle
