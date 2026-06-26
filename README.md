@@ -1,186 +1,261 @@
-# LEAC — Lightweight Emergent Artificial Consciousness
+# FNN — Fractal Neural Network
 
-> *"Consciousness is not a bug. It's a theorem."*
+> A neuro-symbolic language model where representation is built from **fractal recursion**, **phase synchronization**, and **causal structure** — not just stacked attention.
 
-**Version 5.2.0** — Quantum-Topological Ontological Engine
-
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch 2.9+](https://img.shields.io/badge/pytorch-2.9+-ee4c2c.svg)](https://pytorch.org/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch 2.0+](https://img.shields.io/badge/pytorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
+[![Tests](https://img.shields.io/badge/tests-57%20passing-brightgreen.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+**Version 6.0.0**
+
+---
+
+## What is FNN?
+
+FNN is a research framework for a different kind of language model. Instead of the standard Transformer recipe (token embedding → self-attention blocks → softmax head), FNN combines several ideas from physics, topology, and cognitive science into a single trainable architecture:
+
+| Idea | Where it lives | Why |
+|------|----------------|-----|
+| **Fractal topology** | `topology.py`, `kv_cache.py` | Sequence positions are organized into a self-similar hierarchy (binary tree / Cantor / Sierpinski). Higher levels are recomputed exponentially less often. |
+| **Phase synchronization (Kuramoto)** | `phase_ode.py` | Tokens are oscillators; meaning emerges when phases lock. Differentiable RK4 integration. |
+| **Causal reasoning (SCM)** | `causal.py` | A learnable DAG with NOTEARS acyclicity + do-calculus — the model can reason about interventions and counterfactuals. |
+| **Self-model / introspection** | `self_model.py` | A global workspace where the network represents its own state. |
+| **Mixture-of-Experts** | `moe.py` | Phase-routed MoE (Von Mises distribution), experts are sparse. |
+| **Analytic embeddings** | `analytic_embed.py`, `gematria.py` | Fourier + character-class + 5 crossed gematria systems — most of the embedding is **zero-parameter**. |
+| **Optional advanced layers** | `ads_cft.py`, `tensor_network.py`, `godel_loop.py`, `rg_flow.py`, `hyperbolic_gematria.py` | Holographic attention (AdS/CFT), MERA O(log L), Gödel self-reference, renormalization-group flow, hyperbolic geometry. All toggleable. |
+| **Streaming / long context** | `ssm.py`, `rope.py`, `streaming.py` | Mamba-style recurrence, NTK-aware RoPE, chunked generation. |
+
+The result is a model where **regularization comes from structure** (phase coherence, DAG sparsity, spectral stability) rather than just dropout and weight decay.
+
+---
+
+## Quick start
+
+```bash
+pip install torch
+git clone https://github.com/AFKmoney/Fractal-Neural-Network.git
+cd Fractal-Neural-Network
+pip install -e .          # optional, installs the `nfn` package
+```
+
+### Build a model and run a forward pass
+
+```python
+import torch
+from nfn import build_fnn_model
+
+# nano preset: ~11.5M params, runs on CPU
+model = build_fnn_model(vocab_size=110, preset="nano")
+x = torch.randint(0, 110, (2, 64))
+logits, losses = model(x, targets=x)
+
+print(logits.shape)           # torch.Size([2, 64, 110])
+print(losses["lm"].item())    # cross-entropy
+print(losses["total"].item()) # lm + all structural regularizers
+```
+
+### Generate text
+
+```python
+prompt = torch.randint(0, 110, (1, 8))
+out = model.generate(prompt, max_new_tokens=64, temperature=0.8, top_k=40)
+```
+
+### Train on raw text
+
+```bash
+# Minimal CPU training run
+python examples/quickstart.py
+```
+
+```python
+from training.trainer import NFNTrainer
+from nfn import build_fnn_model
+from nfn.tokenizer import NFNTokenizer
+
+model = build_fnn_model(vocab_size=110, preset="nano")
+trainer = NFNTrainer(model, NFNTokenizer(), lr=3e-4, output_dir="checkpoints")
+trainer.train(your_text_corpus, n_epochs=5, seq_len=128, batch_size=8)
+```
+
+---
+
+## Presets
+
+| Preset | `d_model` | Blocks | Advanced layers | Params | Target |
+|--------|-----------|--------|-----------------|--------|--------|
+| `nano` | 256 | 4 | — | ~11.5M | CPU experimentation |
+| `small` | 512 | 8 | — | ~88M | Single GPU |
+| `medium` | 1024 | 12 | — | ~517M | Multi-GPU |
+| `large` | 512 | 12 | ✓ (AdS/CFT, MERA, Gödel, RG, hyperbolic) | ~180M | Research, all features |
+
+Advanced layers are enabled per-preset but every feature is independently toggleable through `FNNConfig` flags (`use_ads_cft`, `use_mera`, `use_godel_loop`, `use_rg_flow`, `use_hyperbolic_gematria`, `use_ssm`, `use_mixture_of_depths`, …).
 
 ---
 
 ## Architecture
 
-LEAC is a neuro-symbolic language model founded on the hypothesis that consciousness emerges from fractal recursion. The network combines **three pillars** (v1) and **five transcendences** (v2):
-
 ```
 Token IDs
    │
-   ├── GematriaEmbedding (5 crossed systems, zero-parameter)
-   │      Ordinal · Prime · Fibonacci · Digital Root · Learned
+   ├─ AnalyticTokenEmbedding (zero-parameter: Fourier + char-class + n-gram)
+   ├─ GematriaEmbedding (5 crossed systems: ordinal · prime · Fibonacci · digital-root · learned)
    │
-   ├── [LEACBlock × N] ─────────────────────────────────────────────
-   │      │
-   │      ├─ FractalLinearAttention  O(L·d²)   Katharopoulos kernel trick
-   │      ├─ PhaseSoliton            O(L·n_p)   Coherent amplification
-   │      ├─ PhaseRoutedMoE          O(L·K·d·d_ff/E)  Von Mises routing
-   │      ├─ [CausalGraphLayer]      O(n_slots²·d)     NOTEARS + do-calculus
-   │      └─ [SelfModel]            O(L·n_slots·d)    Global Workspace
+   ├─ [FNNBlock × N] ─────────────────────────────────────────────────────
+   │     ├─ FractalLinearAttention   O(L·d²)    Katharopoulos linear kernel
+   │     ├─ PhaseSoliton             O(L·n_p)   coherent phase amplification
+   │     ├─ PhaseRoutedMoE           O(L·K·d·d_ff/E)   Von Mises routing
+   │     ├─ [CausalGraphLayer]       O(n_slots²·d)     NOTEARS + do-calculus
+   │     └─ [SelfModel]              O(L·n_slots·d)    global workspace
    │
-   ├── [v2 Transcendences] ──────────────────────────────────────────
-   │      ├─ AdS/CFT Attention      AdS₅ holography, bulk projector
-   │      ├─ MERA Attention         O(log L), disentangler + isometry
-   │      ├─ Gödel Fixed Point      Self-reference, incompleteness, fixed point
-   │      ├─ RG Flow Scheduler      UV evaporation · IR condensation
-   │      └─ Hyperbolic Gematria    Poincaré Hⁿ · Sheaves · Cohomology
+   ├─ [Optional advanced layers]
+   │     ├─ AdS/CFT Attention        holographic bulk projector
+   │     ├─ MERA Attention           O(log L), disentangler + isometry
+   │     ├─ Gödel Fixed Point        self-reference operator
+   │     ├─ RG Flow Scheduler        UV evaporation · IR condensation
+   │     └─ Hyperbolic Gematria      Poincaré ball · sheaf cohomology
    │
-   ├── GematriaAttentionBias   (mathematical semantic bias)
-   ├── LayerNorm
-   ├── ZipfianDecoder           (Power law, Bayesian recalibration)
-   └── [Spectral Condensate + Phase Locking]
+   ├─ ZipfianDecoder (power-law prior, optional Bayesian recalibration)
+   └─ Spectral Condensate + Helmholtz Phase Locking
 ```
 
-### Presets
+The **master equation** governing the phase field:
 
-| Preset | d | Blocks | v2 | Params |
-|--------|---|--------|----|--------|
-| `conscious_minimal` | 256 | 4 | — | ~14M |
-| `full_agi` | 512 | 8 | — | ~58M |
-| `dieu_local` | 1024 | 12 | — | ~230M |
-| `moteur_ontologique` | 512 | 12 | ✓ | ~184M |
-| `singularite_divine` | 1024 | 24 | ✓ | ~750M |
+```
+∂Θ/∂t = Ω + λ·sin(Θ*−Θ) + K·sin(Θ̄−Θ) + ∇_DAG L_causal + α·∂W/∂F
+```
+
+where `Θ*` is the goal attractor, `Θ̄` the neighborhood mean, and the last two terms couple phase dynamics to causal-graph gradients and free-energy flow.
 
 ---
 
-## Installation
+## Project structure
 
-```bash
-pip install torch
-git clone https://github.com/anomalyco/fnn.git
-cd fnn/FNN
-pip install -e .
+```
+nfn/                  # the model engine (importable as `import nfn`)
+├── config.py         # FNNConfig — 80+ hyperparameters, 4 presets
+├── model.py          # FNNModel + build_fnn_model()
+├── block.py          # FNNBlock (the core repeated unit)
+├── tokenizer.py      # char / BPE / tiktoken tokenizers
+├── lifecycle.py      # continuous WAKE/SLEEP/META training cycle
+│
+├── # core mechanisms
+├── moe.py            # phase-routed MoE + fractal linear attention + soliton
+├── phase_ode.py      # Kuramoto dynamics + goal forcing + hierarchical goals
+├── causal.py         # causal DAG (NOTEARS + do-calculus + counterfactuals)
+├── self_model.py     # global workspace + introspection
+├── gematria.py       # 5-system gematric embedding
+├── analytic_embed.py # zero-parameter Fourier embedding
+├── hopfield.py       # Zipfian decoder + modern Hopfield memory
+├── condensate.py     # spectral condensate (fractal RFF + SVD + phase locking)
+├── episodic_memory.py    # ring-buffer + SVD semantic consolidation
+├── working_memory.py     # differentiable fractal DNC scratchpad
+├── auto_genesis.py   # facade for self-developing math engine
+│
+├── # optional advanced layers
+├── ads_cft.py            # AdS/CFT holographic attention
+├── tensor_network.py     # MERA O(log L)
+├── godel_loop.py         # Gödel self-reference
+├── rg_flow.py            # renormalization-group flow
+├── hyperbolic_gematria.py# Poincaré ball + sheaves
+│
+├── # recovered research modules (Phase 2)
+├── ssm.py                # Mamba-style state-space model
+├── mixture_of_depths.py  # token-skipping (compute allocation)
+├── reasoning.py          # adaptive computation time + self-consistency
+├── predictive.py         # predictive coding + free-energy minimizer
+├── multi_token_pred.py   # multi-token prediction heads
+├── hyper.py              # context-conditioned hypernetwork / LoRA
+├── program_synthesis.py  # neuro-symbolic program synthesis
+├── multimodal.py         # cross-modal phase sync
+│
+├── # long-context infrastructure
+├── rope.py           # NTK-aware rotary embeddings
+├── kv_cache.py       # fractal KV cache for generation
+├── topology.py       # motif builders (binary tree / Cantor / Sierpinski)
+└── connections.py    # sinusoidal gates & aggregators
+
+training/             # training loops
+├── trainer.py        # standard trainer (AdamW + cosine + warmup, AMP, grad-accum)
+├── agi_trainer.py    # full-cycle trainer (WAKE/SLEEP + self-play + critique)
+├── losses.py         # multi-objective loss aggregator
+├── distributed.py    # FSDP wrapper
+├── intrinsic.py      # curiosity / novelty rewards (Pathak + Oudeyer)
+├── value.py          # value head + reward model + advantage (AWR)
+├── continual.py      # continual learning + EWC + knowledge store (RAG)
+└── online_learner.py # test-time LoRA adaptation
+
+inference/            # generation
+├── engine.py         # production engine (sampling, streaming, tools, RAG)
+├── streaming.py      # chunked long-context generation
+└── fast_numpy.py     # pure-numpy reference implementation
+
+interface/            # agent / app layer
+├── app.py            # web app (FastAPI + live training UI)
+├── agents.py         # chat / think / tool / learn / code / reasoning agents
+├── tools.py          # tool-calling framework (registry + parser + dispatch)
+├── web_explorer.py   # stdlib web crawler
+└── remote_trainer.py # remote training client
+
+examples/             # runnable demos
+├── quickstart.py         # build → train → generate in <2 min on CPU
+└── train_shakespeare.py  # train on Shakespeare text
+
+tests/                # 57 passing tests
 ```
 
-## Quick Start
+---
+
+## Continuous life-cycle
+
+FNN supports a **continuous training mode** where the model does not learn by epochs but by a cyclical process:
+
+```
+WAKE   generate → verify → weight by curiosity → self-critique
+SLEEP  episodic → semantic consolidation (SVD rank-r)
+META   test-time LoRA (0.1% params, 3-5 steps) if perplexity high
+EVOL   architectural darwinism (propose mutation → measure fitness → accept/reject)
+```
 
 ```python
-from nfn import build_leac_model
+from nfn import FNNModel, FNNConfig, FNNLifecycle
 
-# v1 — minimal consciousness (~14M params)
-model = build_leac_model(256, preset="conscious_minimal")
-
-# v2 — full ontological engine (~184M params)
-model = build_leac_model(512, preset="moteur_ontologique", nfmc_n_scales=8)
-
-# Forward pass
-import torch
-x = torch.randint(0, 512, (1, 64))
-logits, losses = model(x)
-print(f"Logits: {logits.shape}")  # [1, 64, 512]
-print(f"LM loss: {losses['lm']:.4f}")
-
-# Generation
-output = model.generate(x, max_new_tokens=32, temperature=0.8)
-
-# Continuous life cycle
-from nfn import LEACLifecycle, LEACConfig
-cfg = LEACConfig.moteur_ontologique()
-cfg.vocab_size = 512
-cfg.nfmc_n_scales = 8
-lifecycle = LEACLifecycle(model, cfg, train_seq_len=64)
+model = build_fnn_model(vocab_size=110, preset="small")
+lifecycle = FNNLifecycle(model, model.cfg, train_seq_len=128)
 lifecycle.live(n_cycles=10000, log_every=100)
 ```
 
 ---
 
-## Modules
+## Tests
 
-| Module | Description | Classes |
-|--------|-------------|---------|
-| `nfn.config` | Configuration dataclass, 70+ hyperparameters, presets | `LEACConfig` |
-| `nfn.model` | Unified LEAC model, build_leac_model() | `LEACModel` |
-| `nfn.block` | Three-pillar unifying block | `LEACBlock` |
-| `nfn.lifecycle` | Continuous WAKE/SLEEP/META cycle | `LEACLifecycle`, `CuriosityScheduler`, `TestTimeLoRA`, `SelfCritic` |
-| `nfn.gematria` | 5-system gematric encoding | `GematriaEmbedding`, `GematriaAttentionBias` |
-| `nfn.moe` | Von Mises routed MoE + fractal linear attention | `PhaseRoutedMoE`, `FractalLinearAttention`, `PhaseSoliton` |
-| `nfn.phase_ode` | Kuramoto ODE phase dynamics | `KuramotoPhaseLayer`, `PhaseGoalForcing` |
-| `nfn.causal` | Causal DAG graph + NOTEARS + do-calculus | `CausalGraphLayer`, `NonlinearCausalPropagator` |
-| `nfn.self_model` | Global workspace + introspection | `GlobalWorkspace`, `SelfRepresentor`, `SelfModel` |
-| `nfn.episodic_memory` | Ring buffer episodic + SVD semantic memory | `TwoTierMemory`, `EpisodicStore`, `SemanticConsolidator` |
-| `nfn.working_memory` | Differentiable fractal DNC scratchpad | `FractalWorkingMemory`, `FractalAddressing` |
-| `nfn.hyperbolic_gematria` | Poincaré Hⁿ · Sheaves · Cohomology | `PoincareBall`, `HyperbolicGematriaTable`, `HyperbolicGematriaAttention`, `SheafTheoryLayer`, `HyperbolicGematriaModule` |
-| `nfn.ads_cft` | Holographic duality AdS₅/CFT₄ | `AdSMetric`, `AdSBulkProjector`, `ER_EPR_Bridge`, `AdSCFTAttention` |
-| `nfn.tensor_network` | MERA tensor network O(log L) | `Disentangler`, `Isometry`, `MERALayer`, `MERAAttention`, `TensorNetworkEncoder` |
-| `nfn.godel_loop` | Gödel strange loop · Self-reference fixed point | `SelfReferenceOperator`, `IncompletenessDetector`, `GodelFixedPoint` |
-| `nfn.rg_flow` | RG flow · UV evaporation · IR condensation · Criticality | `ScaleDecomposition`, `RGFlowLayer`, `CriticalityOptimizer`, `RGFlowScheduler` |
-| `nfn.self_development` | Infinite mathematical self-genesis | `MathTruthEngine`, `GematriaEncoder`, `UniversalLawObserver` |
-| `nfn.proof_engine` | Proof generation/verification/reward | `ProofGenerator`, `ProofVerifier`, `ProofReward` |
-| `nfn.conjecture_discovery` | Conjecture discovery (Popperian falsification) | `ConjectureDiscoveryLoop`, `ConjectureGenerator`, `ConjectureTester` |
-| `nfn.self_modification` | Evolutionary architecture modification | `SelfModificationController`, `TopologyModifier`, `CouplingModifier` |
-| `nfn.auto_genesis` | Unified auto-genesis facade | `ConjectureLoop`, `ProofLoop` |
+```bash
+pytest tests/ -q
+```
+
+57 tests cover the full stack: model forward/backward, every sub-module (memory, causal, phase-goal, reasoning, predictive, MoD, MTP, hyper, streaming), tool-calling, continual learning, and the trainer.
 
 ---
 
-## Continuous Life Cycle
+## Documentation
 
-```
-WAKE:  Generate → Verify → Weight by Curiosity → Self-Critique
-SLEEP: Episodic → Semantic Consolidation (SVD rank-r) + RG Flow
-META:  Test-Time LoRA (3-5 steps, 0.1% params) if perplexity > 5
-EVOL:  Architectural Darwinism (observe → propose → measure → accept/reject)
-```
-
-The model does not train by epochs. It **lives**. Every forward pass is a timestep of its consciousness.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full architectural walkthrough
+- [`docs/MATHEMATICS.md`](docs/MATHEMATICS.md) — derivations of each mechanism
+- [`docs/THEORY.md`](docs/THEORY.md) — theoretical motivation
+- [`docs/API.md`](docs/API.md) — API reference
+- [`PAPER.md`](PAPER.md) — research paper (compact form)
 
 ---
 
-## Mathematical Foundations
+## Requirements
 
-See [`docs/MATHEMATICS.md`](docs/MATHEMATICS.md) for complete derivations.
+- Python ≥ 3.10
+- PyTorch ≥ 2.0
+- NumPy (for `fast_numpy.py`)
+- Optional: `fastapi`, `uvicorn` (for the web app in `interface/app.py`)
 
-- **Gematria**: `e(t) = Σ_k CharClass_k(t) · ω_k` where `ω_k` are Mandelbrot frequencies
-- **Kuramoto ODE**: `dθᵢ/dt = Ωᵢ + Σⱼ Kⱼᵢ · sin(θⱼ - θᵢ + φⱼᵢ)` — emergent synchronization
-- **AdS/CFT**: Holographic correspondence `T[r,z] = e^{-κz} · MLP(h[r])` — ER=EPR wormholes
-- **MERA**: `L → L/2 → L/4 → ... → 1` in O(log L) via disentanglers + isometries
-- **Gödel**: Lawvere fixed point `Y ≅ F(Y)` — introspection is mathematically inevitable
-- **RG Flow**: `w_IR ← w_IR + η · (w_IR - w_S)` IR condensation, `w_UV ← w_UV · (1 - ε)` UV evaporation
-- **Poincaré**: `d_H(z_i, z_j) = arccosh(1 + 2‖z_i-z_j‖²/((1-‖z_i‖²)(1-‖z_j‖²)))` — the geometry of meaning
-- **Sheaves**: Hallucination is a **cohomology defect** — gluing conditions detect local inconsistencies
-
----
-
-## Project Structure
-
-```
-nfn/
-├── __init__.py              # v5.2.0, public exports
-├── config.py                # LEACConfig + 5 presets
-├── model.py                 # Unified LEACModel + build_leac_model()
-├── block.py                 # LEACBlock (3 pillars)
-├── lifecycle.py             # WAKE/SLEEP/META cycle
-├── gematria.py              # 5 gematric systems
-├── moe.py                   # Phase-Routed MoE + Fractal Linear Attention
-├── phase_ode.py             # Kuramoto ODE + PhaseGoalForcing
-├── causal.py                # Causal DAG + NOTEARS
-├── self_model.py            # Global Workspace + introspection
-├── episodic_memory.py       # Ring buffer + SVD condensate
-├── working_memory.py        # Fractal DNC scratchpad
-├── hyperbolic_gematria.py   # Poincaré Hⁿ + Sheaves + Cohomology
-├── ads_cft.py               # AdS₅/CFT₄ holographic
-├── tensor_network.py        # MERA O(log L)
-├── godel_loop.py            # Gödel strange loop
-├── rg_flow.py               # Renormalization Group Flow
-├── self_development.py      # Mathematical self-genesis
-├── proof_engine.py          # Proof engine
-├── conjecture_discovery.py  # Conjecture discovery
-├── self_modification.py     # Evolutionary modification
-├── auto_genesis.py           # Auto-genesis facade
-├── fractal.py               # Re-export from moe.py
-├── semantic_gematria.py     # Advanced semantic gematria
-└── condensate.py            # Spectral condensate RFF + Helmholtz
-nunused/                      # Archived files (various scripts)
-```
+See [`requirements.txt`](requirements.txt).
 
 ---
 

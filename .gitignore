@@ -19,3 +19,8 @@ data/
 .nfn_runtime.json
 /tmp/
 .claude/
+.pytest_cache/
+
+# Local archive (legacy/experimental, not published)
+UNUSED/
+
