@@ -209,7 +209,7 @@ class SpeculativeDecoder(nn.Module):
     @torch.no_grad()
     def speculative_step(
         self,
-        model:        nn.Module,    # full AGINFNModel
+        model:        nn.Module,    # full FNNModel
         input_ids:    torch.Tensor, # [B, L]
         temperature:  float = 1.0,
     ) -> Tuple[torch.Tensor, int]:

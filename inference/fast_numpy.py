@@ -5,7 +5,7 @@ On this CPU, every PyTorch tensor operation costs ~70ms regardless of size.
 NumPy operations cost <1ms. By reimplementing the forward pass in NumPy
 we reduce per-token latency from ~5 seconds to ~50ms.
 
-Supported architecture: AGINFNModel with EfficientNFNBlocks
+Supported architecture: FNNModel with FNNBlocks
 (all optional AGI features disabled — memory, causal, goal, MoD, etc.)
 """
 import os
@@ -126,7 +126,7 @@ def _moe(x, w):
 
 
 def _block(x, w):
-    """EfficientNFNBlock. x: [L, d] → [L, d]."""
+    """FNNBlock. x: [L, d] → [L, d]."""
     L = x.shape[0]
     x = x + _fractal_attn(_ln(x, w['n1_w'], w['n1_b']), w['attn'])
     x = _soliton(x, w['sol'])
@@ -139,7 +139,7 @@ def _block(x, w):
 def extract_weights(model):
     """
     Extract all model weights to numpy arrays for fast CPU inference.
-    model: AGINFNModel with EfficientNFNBlocks (all optional features disabled).
+    model: FNNModel with FNNBlocks (all optional features disabled).
     """
     w = {}
 

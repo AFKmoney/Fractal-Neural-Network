@@ -30,7 +30,7 @@ Classes:
   ToolSpec         : schema for a callable tool
   ToolRegistry     : collection of tools available to the model
   ToolCallParser   : detects and parses <tool_call> blocks from generated text
-  ToolCallingModel : wraps AGINFNModel.generate() with tool dispatch loop
+  ToolCallingModel : wraps FNNModel.generate() with tool dispatch loop
 """
 
 import json
@@ -190,7 +190,7 @@ class ToolCallParser:
 
 class ToolCallingModel:
     """
-    Wraps AGINFNModel with an agentic tool-calling loop.
+    Wraps FNNModel with an agentic tool-calling loop.
 
     Each generate() call may trigger zero or more tool calls:
       1. Generate tokens until stop condition or <tool_call> is complete
@@ -209,7 +209,7 @@ class ToolCallingModel:
 
     def __init__(
         self,
-        model,                        # AGINFNModel
+        model,                        # FNNModel
         tokenizer: "NFNTokenizer",
         registry:  ToolRegistry,
         max_tool_calls: int = 5,      # safety limit per generation

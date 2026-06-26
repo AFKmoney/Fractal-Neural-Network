@@ -92,7 +92,7 @@ def cosine_with_warmup(
 
 class NFNTrainer:
     """
-    Manages the training loop for an NFNLanguageModel.
+    Manages the training loop for an FNNModel.
 
     Parameters
     ----------

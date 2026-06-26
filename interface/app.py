@@ -107,7 +107,7 @@ def _init_default_model():
     tokenizer = NFNTokenizer()
 
     # Build the smallest viable model. All optional AGI features are disabled
-    # so the AGIBlock reduces to a plain EfficientNFNBlock call. The numpy
+    # so the AGIBlock reduces to a plain FNNBlock call. The numpy
     # inference patch then bypasses PyTorch entirely for ~70× speedup on CPU.
     gpu = device.type == "cuda"
     model = build_fnn_model(

@@ -36,7 +36,7 @@ Parallelism:
 Architecture:
   FractalSSM      : one SSM channel group (d_model → d_model via state)
   SSMBlock        : FractalSSM + convolution + gating (full Mamba-style block)
-  HybridNFNBlock  : EfficientNFNBlock + SSMBlock (attention + recurrence)
+  HybridNFNBlock  : FNNBlock + SSMBlock (attention + recurrence)
 
 References:
   Gu & Dao 2023 "Mamba: Linear-Time Sequence Modeling with Selective State Spaces"

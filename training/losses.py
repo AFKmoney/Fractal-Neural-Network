@@ -124,7 +124,7 @@ class AGILoss:
     """
     Full AGI v5.0 loss aggregator.
 
-    Combines all loss signals from AGINFNModel.forward() into a single
+    Combines all loss signals from FNNModel.forward() into a single
     weighted scalar with per-component tracking for logging.
 
     v5.0 additions:

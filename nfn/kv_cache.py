@@ -142,7 +142,7 @@ class FractalStateCache:
 
 class NFNKVCache:
     """
-    Aggregates all caches for one NFNLanguageModel during generation.
+    Aggregates all caches for one FNNModel during generation.
 
     Usage:
         cache = NFNKVCache(cfg)
