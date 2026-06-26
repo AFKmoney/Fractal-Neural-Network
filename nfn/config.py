@@ -181,6 +181,21 @@ class FNNConfig:
     max_seq_len: int = 4096
     context_len: int = 32768
 
+    # ── Modules optionnels (récupérés, désactivés par défaut) ────────────────
+    # State-Space Model (Mamba-like) — récurrence linéaire pour le streaming
+    use_ssm: bool = False
+    ssm_d_state: int = 16
+    ssm_d_conv: int = 4
+    # Mixture of Depths — skip de tokens (économie de calcul)
+    use_mixture_of_depths: bool = False
+    mod_top_k: float = 0.5
+    # Predictive Coding — codage prédictif top-down
+    use_predictive_coding: bool = False
+    predictive_n_levels: int = 2
+    # Multi-Token Prediction — têtes lookahead + perte auxiliaire
+    use_mtp: bool = False
+    mtp_depth: int = 4
+
     # ── Generation ──────────────────────────────────────────────────────────
     temperature: float = 0.8
     top_k: int = 50

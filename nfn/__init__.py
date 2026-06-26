@@ -45,13 +45,24 @@ from .rg_flow import (
     ScaleDecomposition, RGFlowLayer, CriticalityOptimizer, RGFlowScheduler,
 )
 
+# ── Modules optionnels (recuperes de UNUSED/misc, Phase 2) ────────────────────
+from .ssm import FractalSSM, SSMBlock, HybridNFNBlock
+from .mixture_of_depths import MixtureOfDepths, MoDRouter
+from .hyper import ContextHyperNet, HyperAdapter, HyperLinear
+from .predictive import PredictiveCodingBlock, FreeEnergyMinimiser
+from .multi_token_pred import MultiTokenPredictor, MTPHead
+from .reasoning import RecursiveReasoner, HaltingUnit, SelfConsistencyCheck
+from .program_synthesis import ProgramSynthesizer
+from .multimodal import MultimodalFractalRFF, CrossModalSync
+from .phase_ode import HierarchicalGoalDecomposer
+
 __all__ = [
     # Core
     "FNNConfig", "FNNModel", "FNNBlock", "FNNLifecycle", "build_fnn_model",
     # Gematria
     "GematriaEmbedding", "GematriaAttentionBias",
     # Kuramoto
-    "KuramotoPhaseLayer", "PhaseGoalForcing",
+    "KuramotoPhaseLayer", "PhaseGoalForcing", "HierarchicalGoalDecomposer",
     # Fractal
     "FractalLinearAttention", "PhaseSoliton", "PhaseRoutedMoE",
     # Causal
@@ -71,6 +82,15 @@ __all__ = [
     "SelfReferenceOperator", "IncompletenessDetector", "GodelFixedPoint",
     # RG Flow
     "ScaleDecomposition", "RGFlowLayer", "CriticalityOptimizer", "RGFlowScheduler",
+    # Modules optionnels (Phase 2)
+    "FractalSSM", "SSMBlock", "HybridNFNBlock",
+    "MixtureOfDepths", "MoDRouter",
+    "ContextHyperNet", "HyperAdapter", "HyperLinear",
+    "PredictiveCodingBlock", "FreeEnergyMinimiser",
+    "MultiTokenPredictor", "MTPHead",
+    "RecursiveReasoner", "HaltingUnit", "SelfConsistencyCheck",
+    "ProgramSynthesizer",
+    "MultimodalFractalRFF", "CrossModalSync",
     # Compatibilite LEAC (deconseille, retirer dans une future version)
     "LEACConfig", "LEACModel", "LEACBlock", "LEACLifecycle",
 ]

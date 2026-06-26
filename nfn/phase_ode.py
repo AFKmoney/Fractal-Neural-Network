@@ -17,7 +17,7 @@ Solver: adaptive RK4 with S fixed steps (S=4 in practice, good quality/cost).
 """
 
 import math
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -346,3 +346,116 @@ class PhaseGoalForcing(nn.Module):
             goal = goal.unsqueeze(1)
         alignment = torch.cos(theta - goal).mean(-1)
         return -alignment.mean()
+
+    def goal_logit_bias(self, goal_phase: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        Biais dans l'espace des logits conditionne par le but.
+        goal_phase: [B, n_phases] (utilise le but courant si None).
+        Returns [B, d_model] a ajouter a l'entree du LM head.
+        """
+        gp = goal_phase if goal_phase is not None else self._goal_phase
+        if gp is None:
+            return None
+        return self.goal_bias_proj(gp) * 0.05
+
+    def reward_goal_achievement(self, theta: torch.Tensor) -> torch.Tensor:
+        """
+        Recompense d'atteinte du but ∈ [0, 1] (haute quand les phases
+        sont alignees avec θ*). Utilisable comme recompense intrinseque RL.
+        theta: [B, L, n_phases] ou [B, n_phases].
+        """
+        if self._goal_phase is None:
+            return torch.zeros(theta.shape[0], device=theta.device)
+        goal = self._goal_phase
+        if goal.dim() < theta.dim():
+            goal = goal.unsqueeze(1)
+        alignment = torch.cos(theta - goal).mean(-1)  # [B, L] ou [B]
+        if alignment.dim() > 1:
+            alignment = alignment.mean(-1)
+        return alignment.clamp(0.0, 1.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Decomposition Hierarchique de Buts (sub-goals en arbre binaire)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class HierarchicalGoalDecomposer(nn.Module):
+    """
+    Decompose un but de haut niveau en une hierarchie de sous-buts.
+
+    Arbre binaire a n_levels: un but → 2^level sous-buts fins.
+    Le modele apprend quelle branche poursuivre a chaque etape via les
+    scores d'alignement.
+
+    Usage:
+        decomposer.set_goal(goal_phase)             # [B, n_phases]
+        subgoal = decomposer.get_subgoal(alignment)  # [B, n_phases]
+        theta = attractor(theta, subgoal)
+    """
+
+    def __init__(self, n_phases: int, n_levels: int = 3):
+        super().__init__()
+        self.n_phases = n_phases
+        self.n_levels = n_levels
+        self.n_leaves = 2 ** n_levels
+
+        self.splitter = nn.Sequential(
+            nn.Linear(n_phases, n_phases * 2),
+            nn.SiLU(),
+            nn.Linear(n_phases * 2, n_phases * 2),
+        )
+        nn.init.zeros_(self.splitter[-1].weight)
+        nn.init.zeros_(self.splitter[-1].bias)
+
+        self._goal_tree: Optional[List[torch.Tensor]] = None
+        self._current_leaf: int = 0
+
+    def _build_tree(self, goal: torch.Tensor) -> List[torch.Tensor]:
+        tree = [goal]
+        for _ in range(self.n_levels):
+            new_tree = []
+            for node in tree:
+                split = self.splitter(node)
+                left = node + split[:, :self.n_phases] * 0.3
+                right = node + split[:, self.n_phases:] * 0.3
+                new_tree.extend([left, right])
+            tree = new_tree
+        return tree
+
+    def set_goal(self, goal_phase: torch.Tensor):
+        """Construit l'arbre des sous-buts depuis goal_phase [B, n_phases]."""
+        self._goal_tree = self._build_tree(goal_phase)
+        self._current_leaf = 0
+
+    def get_subgoal(
+        self,
+        alignment: Optional[torch.Tensor] = None,
+        advance_threshold: float = 0.75,
+    ) -> Optional[torch.Tensor]:
+        """
+        Retourne le sous-but courant [B, n_phases].
+        Avance a la feuille suivante si l'alignement depasse le seuil.
+        """
+        if self._goal_tree is None:
+            return None
+        if (alignment is not None
+                and alignment.mean().item() >= advance_threshold
+                and self._current_leaf < self.n_leaves - 1):
+            self._current_leaf += 1
+        return self._goal_tree[self._current_leaf]
+
+    def hierarchy_loss(self, theta: torch.Tensor) -> torch.Tensor:
+        """Perte encourageant chaque feuille de la hierarchie a etre atteignable."""
+        if self._goal_tree is None:
+            return torch.tensor(0.0, device=theta.device)
+        total = torch.tensor(0.0, device=theta.device)
+        for leaf in self._goal_tree:
+            leaf_d = leaf.to(theta.device)
+            if leaf_d.dim() < theta.dim():
+                leaf_d = leaf_d.unsqueeze(1)
+            total = total + (1.0 - torch.cos(theta - leaf_d)).mean()
+        return total / max(len(self._goal_tree), 1)
+
+    def reset(self):
+        self._goal_tree = None
+        self._current_leaf = 0
