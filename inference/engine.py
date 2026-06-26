@@ -1,7 +1,7 @@
 """
 NFN AGI Inference Engine v4.0
 
-Wraps AGINFNModel with production-grade sampling, streaming, and AGI features:
+Wraps FNNModel with production-grade sampling, streaming, and AGI features:
   - Token streaming (generator + async generator)
   - Speculative decoding (2-4× speedup via MTP heads)
   - Think rounds (internal reasoning before generation)
@@ -19,10 +19,10 @@ from typing import AsyncIterator, Dict, Generator, Iterator, List, Optional, Tup
 import torch
 import torch.nn.functional as F
 
-from nfn.config import NFNConfig
+from nfn.config import FNNConfig
 from nfn.tokenizer import NFNTokenizer
-from nfn.tools import ToolRegistry, ToolCallingModel, make_default_registry
-from nfn.continual import ContinualLearner, KnowledgeStore
+from interface.tools import ToolRegistry, ToolCallingModel, make_default_registry
+from training.continual import ContinualLearner, KnowledgeStore
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ def sample_token(
 
 class AGIInferenceEngine:
     """
-    Production inference engine for AGINFNModel.
+    Production inference engine for FNNModel.
 
     Features:
       - Streaming token generation (sync + async)
@@ -106,7 +106,7 @@ class AGIInferenceEngine:
 
     def __init__(
         self,
-        model,                              # AGINFNModel
+        model,                              # FNNModel
         tokenizer: NFNTokenizer,
         registry: Optional[ToolRegistry] = None,
         device: Optional[torch.device]   = None,
@@ -395,7 +395,7 @@ class AGIInferenceEngine:
     # ── Tool management ──────────────────────────────────────────────────────
 
     def register_tool(self, name: str, description: str, parameters: dict, fn) -> None:
-        from nfn.tools import ToolSpec
+        from interface.tools import ToolSpec
         self.registry.register(ToolSpec(name, description, parameters, fn))
         self.tool_model = ToolCallingModel(self.model, self.tokenizer, self.registry)
 

@@ -51,9 +51,9 @@ ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "interface" / "static"
 sys.path.insert(0, str(ROOT))
 
-from nfn.config import NFNConfig
+from nfn.config import FNNConfig
 from nfn.tokenizer import NFNTokenizer
-from nfn.agi_model import build_agi_model
+from nfn.model import build_fnn_model
 from inference.engine import AGIInferenceEngine
 from training.agi_trainer import AGITrainer
 from interface.agents import ChatAgent, ThinkAgent, ToolAgent, LearnAgent, CodeAgent, ReasoningAgent
@@ -110,7 +110,7 @@ def _init_default_model():
     # so the AGIBlock reduces to a plain EfficientNFNBlock call. The numpy
     # inference patch then bypasses PyTorch entirely for ~70× speedup on CPU.
     gpu = device.type == "cuda"
-    model = build_agi_model(
+    model = build_fnn_model(
         vocab_size            = tokenizer.vocab_size,
         d_model               = 128,
         n_blocks              = 2,
@@ -461,8 +461,8 @@ async def load_model(req: LoadModelRequest):
     ckpt_path = req.checkpoint_path or req.path or ""
     try:
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-        cfg  = NFNConfig.from_dict(ckpt["cfg"])
-        model = build_agi_model(
+        cfg  = FNNConfig.from_dict(ckpt["cfg"])
+        model = build_fnn_model(
             vocab_size = cfg.vocab_size,
             d_model    = cfg.d_model,
             n_blocks   = cfg.n_blocks,
@@ -1479,7 +1479,7 @@ async def root():
 # ─────────────────────────────────────────────────────────────────────────────
 
 try:
-    from nfn.web_explorer import WebExplorer as _WebExplorerClass
+    from interface.web_explorer import WebExplorer as _WebExplorerClass
     _explorer = _WebExplorerClass()
 except Exception:
     _explorer = None  # type: ignore[assignment]
@@ -1670,7 +1670,7 @@ async def ttl_stats():
 async def ttl_enable(req: TTLEnableRequest):
     global _online_learner
     try:
-        from nfn.online_learner import OnlineLearner
+        from training.online_learner import OnlineLearner
         engine = get_engine()
         _online_learner = OnlineLearner(
             engine.model,
