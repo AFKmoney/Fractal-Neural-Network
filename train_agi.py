@@ -45,8 +45,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # ─── NFN Imports ─────────────────────────────────────────────────────────────
-from nfn.config import NFNConfig
-from nfn.agi_model import AGINFNModel
+from nfn.config import FNNConfig
+from nfn.model import FNNModel
 from nfn.tokenizer import CharTokenizer
 
 from nfn.self_development import (
@@ -736,7 +736,7 @@ def main():
     print(f"Device: {device}")
 
     # Config — build a capable but trainable model
-    cfg = NFNConfig(
+    cfg = FNNConfig(
         vocab_size=1024,  # accommodates MathTruthEngine offset+256 encoding + CharTokenizer
         d_model=args.d_model,
         n_blocks=args.n_blocks,
@@ -762,7 +762,7 @@ def main():
           f"experts={cfg.moe_n_experts}, levels={cfg.n_levels}")
 
     # Build model
-    model = AGINFNModel(cfg).to(device)
+    model = FNNModel(cfg).to(device)
     pc = model.param_count()
     print(f"Model: {pc['total']:,} parameters")
     print(model)

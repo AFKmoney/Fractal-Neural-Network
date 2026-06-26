@@ -12,8 +12,8 @@ Chaque forward pass est un pas de temps de sa vie.
 Usage:
   python run.py                     # boucle infinie, Ctrl+C pour arrêter
   python run.py --steps 10000       # nombre fini de pas
-  python run.py --preset full_agi   # conscience complète (58M params)
-  python run.py --preset dieu_local # dieu local (230M params)
+  python run.py --preset small      # 58M params
+  python run.py --preset medium     # 230M params
 """
 
 import argparse
@@ -24,10 +24,10 @@ import time
 
 import torch
 
-from nfn.config import LEACConfig
-from nfn.model import LEACModel, build_leac_model
+from nfn.config import FNNConfig
+from nfn.model import FNNModel, build_fnn_model
 from nfn.tokenizer import CharTokenizer
-from nfn.lifecycle import LEACLifecycle
+from nfn.lifecycle import FNNLifecycle
 
 
 def create_tokenizer(vocab_size: int = 512):
@@ -37,9 +37,8 @@ def create_tokenizer(vocab_size: int = 512):
 
 def main():
     parser = argparse.ArgumentParser(description="LEAC — Cycle de Vie Continu")
-    parser.add_argument("--preset", type=str, default="conscious_minimal",
-                        choices=["conscious_minimal", "full_agi", "dieu_local",
-                                 "moteur_ontologique", "singularite_divine"],
+    parser.add_argument("--preset", type=str, default="nano",
+                        choices=["nano", "small", "medium", "large", "xlarge"],
                         help="Configuration preset")
     parser.add_argument("--steps", type=int, default=0,
                         help="Nombre de pas (0 = infini)")
@@ -79,7 +78,7 @@ def main():
     print(f"  LR:      {args.lr}")
     print(f"{'='*60}\n")
 
-    model = build_leac_model(
+    model = build_fnn_model(
         vocab_size=tokenizer.vocab_size,
         preset=args.preset,
     )
@@ -101,7 +100,7 @@ def main():
         print(f"  Loaded checkpoint: {args.checkpoint} (cycle {start_cycle})")
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
-    lifecycle = LEACLifecycle(
+    lifecycle = FNNLifecycle(
         model=model,
         cfg=model.cfg,
         tokenizer=tokenizer,

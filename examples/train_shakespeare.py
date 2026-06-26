@@ -15,14 +15,14 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import torch
-from nfn.config import NFNConfig
-from nfn.network import NFNLanguageModel
+from nfn.config import FNNConfig
+from nfn.model import FNNModel
 from nfn.tokenizer import NFNTokenizer
 from inference.engine import NFNInferenceEngine
 from training.trainer import NFNTrainer
 
 # ── Config ────────────────────────────────────────────────────────────────────
-cfg = NFNConfig(
+cfg = FNNConfig(
     d_model=128,
     d_ff=512,
     n_levels=3,
@@ -30,8 +30,6 @@ cfg = NFNConfig(
     motifs=["binary_tree", "cantor"],
     n_blocks=2,
     n_heads=4,
-    rank=4,
-    n_time_steps=4,
     max_seq_len=256,
     dropout=0.1,
 )
@@ -64,7 +62,7 @@ cfg.pad_token_id = tokenizer.pad_token_id
 cfg.bos_token_id = tokenizer.bos_token_id
 cfg.eos_token_id = tokenizer.eos_token_id
 
-model = NFNLanguageModel(cfg).to(device)
+model = FNNModel(cfg).to(device)
 print(f"NFN | {model.param_summary()} params | device={device}")
 
 # ── Train ─────────────────────────────────────────────────────────────────────

@@ -19,8 +19,8 @@ import torch
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
-from nfn.config import NFNConfig
-from nfn.network import NFNLanguageModel
+from nfn.config import FNNConfig
+from nfn.model import FNNModel
 from nfn.tokenizer import NFNTokenizer
 from training.trainer import NFNTrainer
 
@@ -56,12 +56,12 @@ def select_device(pref: str) -> torch.device:
     return torch.device(pref)
 
 
-def build_model(args, tokenizer: NFNTokenizer) -> NFNLanguageModel:
+def build_model(args, tokenizer: NFNTokenizer) -> FNNModel:
     cfg_path = ROOT / "configs" / f"{args.config}.json"
     with open(cfg_path) as f:
         cfg_dict = json.load(f)
 
-    cfg = NFNConfig(**cfg_dict)
+    cfg = FNNConfig(**cfg_dict)
     cfg.vocab_size = tokenizer.vocab_size
     cfg.pad_token_id = tokenizer.pad_token_id
     cfg.bos_token_id = tokenizer.bos_token_id
@@ -70,7 +70,7 @@ def build_model(args, tokenizer: NFNTokenizer) -> NFNLanguageModel:
     if args.seq_len:
         cfg.max_seq_len = args.seq_len
 
-    return NFNLanguageModel(cfg)
+    return FNNModel(cfg)
 
 
 def main():
@@ -91,8 +91,8 @@ def main():
     if args.resume:
         print(f"Resuming from {args.resume}…")
         ckpt = torch.load(args.resume, map_location=device)
-        cfg = NFNConfig.from_dict(ckpt["cfg"])
-        model = NFNLanguageModel(cfg).to(device)
+        cfg = FNNConfig.from_dict(ckpt["cfg"])
+        model = FNNModel(cfg).to(device)
         model.load_state_dict(ckpt["model_state"])
     else:
         model = build_model(args, tokenizer).to(device)

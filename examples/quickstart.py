@@ -12,8 +12,8 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 import torch
-from nfn.config import NFNConfig
-from nfn.network import NFNLanguageModel
+from nfn.config import FNNConfig
+from nfn.model import FNNModel
 from nfn.tokenizer import NFNTokenizer
 from inference.engine import NFNInferenceEngine
 from training.trainer import NFNTrainer
@@ -31,7 +31,7 @@ CORPUS = (
 ) * 30
 
 # Tiny model for quick demo
-cfg = NFNConfig(
+cfg = FNNConfig(
     d_model=64,
     d_ff=256,
     n_levels=2,
@@ -39,8 +39,6 @@ cfg = NFNConfig(
     motifs=["binary_tree"],
     n_blocks=2,
     n_heads=2,
-    rank=4,
-    n_time_steps=2,
     max_seq_len=128,
     dropout=0.0,
 )
@@ -52,10 +50,10 @@ cfg.pad_token_id = tokenizer.pad_token_id
 cfg.bos_token_id = tokenizer.bos_token_id
 cfg.eos_token_id = tokenizer.eos_token_id
 
-model = NFNLanguageModel(cfg).to(device)
-engine = NFNInferenceEngine(model, tokenizer, device)
+model = FNNModel(cfg).to(device)
+engine = NFNInferenceEngine(model, tokenizer, device=device)
 
-print(f"NFN nano | {model.param_summary()} params")
+print(f"NFN nano | {sum(p.numel() for p in model.parameters()):,} params")
 print(f"Vocab: {cfg.vocab_size} tokens (char-level)")
 print()
 

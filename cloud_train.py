@@ -518,8 +518,8 @@ def main():
         print("  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121")
         sys.exit(1)
 
-    from nfn.config import NFNConfig
-    from nfn.agi_model import build_agi_model
+    from nfn.config import FNNConfig
+    from nfn.model import build_fnn_model
     from nfn.tokenizer import NFNTokenizer
     from training.agi_trainer import AGITrainer
 
@@ -535,9 +535,9 @@ def main():
         cfg_path = ROOT / "configs" / f"{preset['config']}.json"
         if cfg_path.exists():
             raw = json.loads(cfg_path.read_text())
-            cfg = NFNConfig(**{k: v for k, v in raw.items() if hasattr(NFNConfig, k)})
+            cfg = FNNConfig(**{k: v for k, v in raw.items() if hasattr(FNNConfig, k)})
         else:
-            cfg = NFNConfig()
+            cfg = FNNConfig()
         cfg.vocab_size = tok.vocab_size
         if args.seq_len or preset.get("seq_len"):
             cfg.max_seq_len = args.seq_len or preset["seq_len"]
@@ -556,7 +556,7 @@ def main():
         cfg.use_intrinsic         = True
         cfg.use_theory_of_mind    = True
 
-        model = build_agi_model(
+        model = build_fnn_model(
             vocab_size = cfg.vocab_size,
             d_model    = cfg.d_model,
             n_blocks   = cfg.n_blocks,
@@ -584,7 +584,7 @@ def main():
 
     # ── Optional TTL ──────────────────────────────────────────────────────
     if args.ttl:
-        from nfn.online_learner import OnlineLearner
+        from training.online_learner import OnlineLearner
         learner = OnlineLearner(model, tok, adapter_rank=8)
         print(f"  TTL    : {learner}")
     else:
