@@ -56,6 +56,17 @@ from .program_synthesis import ProgramSynthesizer
 from .multimodal import MultimodalFractalRFF, CrossModalSync
 from .phase_ode import HierarchicalGoalDecomposer
 
+# ── Infrastructure long-contexte (orphelins rebranches, Phase 3) ─────────────
+from .rope import RoPECache, precompute_freqs_cis, apply_rotary_emb
+from .kv_cache import AttentionKVCache, FractalStateCache, NFNKVCache
+from .topology import (
+    FractalLevel, build_binary_tree, build_cantor, build_sierpinski,
+    build_motif, get_padded_length,
+)
+from .connections import (
+    SinusoidalGate, SinusoidalAggregator, SinusoidalBroadcast, InterMotifCoupler,
+)
+
 __all__ = [
     # Core
     "FNNConfig", "FNNModel", "FNNBlock", "FNNLifecycle", "build_fnn_model",
@@ -91,6 +102,12 @@ __all__ = [
     "RecursiveReasoner", "HaltingUnit", "SelfConsistencyCheck",
     "ProgramSynthesizer",
     "MultimodalFractalRFF", "CrossModalSync",
+    # Long-contexte / fractal topology (Phase 3)
+    "RoPECache", "precompute_freqs_cis", "apply_rotary_emb",
+    "AttentionKVCache", "FractalStateCache", "NFNKVCache",
+    "FractalLevel", "build_binary_tree", "build_cantor", "build_sierpinski",
+    "build_motif", "get_padded_length",
+    "SinusoidalGate", "SinusoidalAggregator", "SinusoidalBroadcast", "InterMotifCoupler",
     # Compatibilite LEAC (deconseille, retirer dans une future version)
     "LEACConfig", "LEACModel", "LEACBlock", "LEACLifecycle",
 ]
