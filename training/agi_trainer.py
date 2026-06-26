@@ -651,7 +651,8 @@ class AGITrainer:
         self.model.eval()
         with torch.no_grad():
             # Stage 1: episodic → semantic consolidation
-            for block in self.model._agi_blocks:
+            blocks = getattr(self.model, "blocks", getattr(self.model, "_agi_blocks", []))
+            for block in blocks:
                 if hasattr(block, "memory") and block.memory is not None:
                     block.memory.maybe_consolidate()
 

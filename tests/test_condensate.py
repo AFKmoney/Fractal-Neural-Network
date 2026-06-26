@@ -14,9 +14,10 @@ class TestFractalRFF(unittest.TestCase):
         self.assertAlmostEqual(rff._norm, math.sqrt(2.0 / 32))
 
     def test_n_features_indivisible_by_n_scales(self):
-        # Invalid initialization (n_features not divisible by n_scales)
-        with self.assertRaisesRegex(AssertionError, "n_features must be divisible by n_scales"):
-            FractalRFF(d_in=16, n_features=30, n_scales=8)
+        # Auto-rounded to the nearest multiple of n_scales (no longer asserts)
+        rff = FractalRFF(d_in=16, n_features=30, n_scales=8)
+        self.assertEqual(rff.n_features % 8, 0)
+        self.assertGreaterEqual(rff.n_features, 30)
 
     def test_forward_pass_shape(self):
         rff = FractalRFF(d_in=16, n_features=32, n_scales=8)
