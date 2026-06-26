@@ -4,7 +4,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/pytorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
-[![Tests](https://img.shields.io/badge/tests-57%20passing-brightgreen.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-160%20passing-brightgreen.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **Version 6.0.0**
@@ -27,6 +27,41 @@ FNN is a research framework for a different kind of language model. Instead of t
 | **Streaming / long context** | `ssm.py`, `rope.py`, `streaming.py` | Mamba-style recurrence, NTK-aware RoPE, chunked generation. |
 
 The result is a model where **regularization comes from structure** (phase coherence, DAG sparsity, spectral stability) rather than just dropout and weight decay.
+
+---
+
+## PRISM — alternative backbone (integrated from PRISM-KB)
+
+FNN also ships **PRISM** (`nfn.prism`), a complete alternative architecture integrated from the [PRISM-KB](https://github.com/AFKmoney/prism-kb) project. It unifies four paradigms under one abstraction and adds several mechanisms FNN's core does not have:
+
+| PRISM mechanism | Module | What it does |
+|-----------------|--------|--------------|
+| **Multi-Rate Bus** | `mrb.py` | Sub-quadratic `O(n)` backbone: a bank of recurrent filters at logarithmically-spaced decay rates, with a learned per-token scale gate. Replaces self-attention. |
+| **Polymorphic MoE** | `router.py`, `experts.py` | A router picks, **per token**, which *kind* of computation it needs: Neural (MLP), Memory (read/write head), or Symbolic (differentiable primitives) — heterogeneous experts, not homogeneous MLPs. |
+| **Shared memory bus** | `memory.py` | One memory tape `(S × d_mem)` flows through all layers and time steps — the Global Workspace through which experts communicate. |
+| **Holographic memory (PRISM-Holo)** | `holo.py` | An algebraic Vector-Symbolic-Architecture tape that **binds and retrieves facts with zero training**. `tape.bind(key, value)` is instant CPU algebra; retrieval lands the right fact at rank 1/20 in testing. |
+| **Differentiable symbolic reasoning** | `symbolic.py` | 6 differentiable primitives (compare, gate, select, shift, threshold, count) soft-selected and composed end-to-end inside the router. |
+| **Progressive Capacity Stacking** | `pcs.py` | Grow a model 350M → 700M → 1B with weight inheritance (`grow_model()`) — ~40-50% wall-clock savings. |
+| **CogLoop** | `cogloop.py` | PERCEIVE → REFLECT → RESPOND → CONSOLIDATE cognitive loop with persistent two-tier (working + long-term) memory. |
+| **Curriculum + token recycling** | `curriculum.py` | Re-weight dataset mix across training (neural → memory → symbolic); inverse-frequency token weighting for hard tokens. |
+| **Modular pretraining** | `modular.py` | Train each expert kind separately on its optimal data, then assemble. |
+
+```python
+from nfn.prism import Prism, PrismConfig
+from nfn.prism.holo import HoloTape
+
+# PRISM model (multi-rate bus + polymorphic MoE)
+cfg = PrismConfig(vocab_size=256, d_model=128, num_layers=4)
+model = Prism(cfg)
+
+# Holographic zero-training fact binding
+import torch
+tape = HoloTape(D=4096)
+tape.bind(torch.randn(4096), torch.randn(4096))   # pure algebra, instant
+retrieved = tape.unbind(torch.randn(4096))         # same op = self-inverse
+```
+
+PRISM and the FNN core are independent backbones that share the FNN training infrastructure.
 
 ---
 
@@ -202,7 +237,8 @@ examples/             # runnable demos
 ├── quickstart.py         # build → train → generate in <2 min on CPU
 └── train_shakespeare.py  # train on Shakespeare text
 
-tests/                # 57 passing tests
+tests/                # 160 passing tests (57 FNN + 103 PRISM)
+└── prism/            # PRISM test suite
 ```
 
 ---
@@ -234,7 +270,7 @@ lifecycle.live(n_cycles=10000, log_every=100)
 pytest tests/ -q
 ```
 
-57 tests cover the full stack: model forward/backward, every sub-module (memory, causal, phase-goal, reasoning, predictive, MoD, MTP, hyper, streaming), tool-calling, continual learning, and the trainer.
+57 tests cover the FNN full stack: model forward/backward, every sub-module (memory, causal, phase-goal, reasoning, predictive, MoD, MTP, hyper, streaming), tool-calling, continual learning, and the trainer. An additional 103 tests cover the integrated PRISM backbone (MRB, polymorphic router, memory bus, symbolic library, holographic VSA tape, PCS scaling, CogLoop, curriculum).
 
 ---
 

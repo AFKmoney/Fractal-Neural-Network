@@ -67,6 +67,13 @@ from .connections import (
     SinusoidalGate, SinusoidalAggregator, SinusoidalBroadcast, InterMotifCoupler,
 )
 
+# ── Sous-package PRISM (mecanismes integres depuis PRISM-KB) ──────────────────
+# Import paresseux pour ne pas penaliser l'import de base. Acceder via:
+#   from nfn.prism import Prism, PrismConfig, HoloTape, MultiRateBus, ...
+# Mecanismes: backbone multi-taux (MRB), MoE polymorphique heterogene,
+# memoire holographique VSA (zero entraînement), scaling progressif (PCS),
+# CogLoop, curriculum, pretraining modulaire.
+
 __all__ = [
     # Core
     "FNNConfig", "FNNModel", "FNNBlock", "FNNLifecycle", "build_fnn_model",
