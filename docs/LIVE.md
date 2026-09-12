@@ -2,25 +2,24 @@
 
 Même règle que Fractus : le cerveau reste, le body se patche, l’offset est dans le manifest.
 
-## Interdits
-
-- Recréer / wipe le `.pt`
-- `tokens_seen = 0` si RESUME.progress > 0
--Écraser `fnn_talk.pt` (d=128) avec un d=256 — fichier NEUF
-- Traiter un snapshot comme un train-and-ship
-
 ## Fichiers
 
 | Fichier | Rôle |
 |---|---|
-| `examples/live_train.py` | boucle infinie par slices |
-| `RESUME_d256.json` | offset : `tokens_seen`, `step`, `loss` |
+| `examples/live_train.py` | une slice puis exit ; relancer continue |
+| `RESUME_d256.json` | `tokens_seen`, `step`, `loss` |
 | `fnn_d256.pt` | cerveau d=256, 2 blocs |
-| `fnn_talk.pt` | cerveau d=128 archivé, on y touche pas |
+| `fnn_talk.pt` | d=128 archivé |
 
-Relancer `python examples/live_train.py` = continue. Pas de phase 1 replay.
+## Interdits
 
-## État 2026-09-12
+- Recréer / wipe le `.pt`
+- `tokens_seen = 0` si RESUME.progress > 0
+- Écraser `fnn_talk.pt` avec un d=256
+- Rejouer une phase 1 par-dessus un offset > 0
 
-- d=128 talk : 403k actifs, ~4.2M tok, loss 2.96, costume pas phrase. Fichier gardé.
-- d=256 live : nouveau fichier, 2 blocs, MoE 4→2, BPE-1024 réutilisé. Premier slice en cours.
+`live_train.py` refuse d’écrire `tokens_seen=0` par-dessus un cerveau existant.
+
+## État
+
+d=256 slice 1 : step 800, 409 600 tok, loss 3.82. Prochain lancement reprend là.

@@ -1,20 +1,21 @@
 # Speed patches (2026-09-12)
 
-Body only. Same parameter names. `fnn_d256.pt` / `fnn_talk.pt` still load.
+Body only. Mêmes noms de paramètres. Les `.pt` existants chargent.
 
-## 1. MoE — experts top-k seulement
+## 1. MoE top-k réel
 
-Avant : `x @ W1.view(E*d_ff, d)` = les **E** experts, puis masque.
-Après : boucle sur E, GEMM seulement sur les tokens routés vers e.
+Avant : `x @ W1.view(E*d_ff, d)` = E experts, puis masque.
+Après : boucle sur E, GEMM sur les tokens routés vers e seulement.
 
-Même sortie à 1e-7 près (les experts masqués étaient ×0).
+Sortie identique à ~1e-7.
 
-À E=4, L=128, CPU, le gros GEMM unique peut rester aussi vite — le gain est E grand / d_ff grand.
+## 2. Attn chunked + carry (S, z)
 
-## 2. Attn — plus de `[B,H,L,d,d]`
+Plus de `[B,H,L,d,d]`. Pic `[B,H,C,d,d]`, C=32, plus l’état S, z.
 
-Carry `(S, z)` par chunk (`chunk_size=32`).
-Pic mémoire : `[B,H,C,d,d]` pas `[B,H,L,d,d]`.
-Chunk vs C=L : maxdiff 1e-7.
+Chunk vs C=L : maxdiff ~1e-7.
 
-À L=128 le wall-clock est plat (4 petits chunks). À L≥4k le pic RAM / alloc disparaît.
+## Où ça paie
+
+E=4, L=128, CPU : wall-clock plat.
+Ça paie quand E monte ou L ≥ 4k.
