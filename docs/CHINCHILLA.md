@@ -1,27 +1,17 @@
 # Mini FNN runs
 
-Toujours 2 blocs. Flags greffe OFF.
+Toujours 2 blocs.
 
-## A — 80k actifs, BPE-400, 100× Shakespeare
+## A — 80k BPE-400 100×
 
-7.95 M tok, loss → 2.60 plateau. Pastiche, pas de phrase.
+Loss → 2.60 plateau. Pastiche.
 
-## B — talk attempt, d=128, BPE-1024
+## B — d=128 BPE-1024 ~4.2M tok
 
-| | |
-|---|---|
-| Total / actifs | 536 338 / **402 962** |
-| Vocab | 1024 (756 merges) |
-| Tokens vus | ~4.2 M (~10× actifs) |
-| Loss | 6.95 → **2.96** |
+403k actifs, loss 6.95 → 2.96. Costume de pièce, pas de phrase.
+Cerveau : `fnn_talk.pt` — **on n’y touche plus**.
 
-Génération (T=0.35–0.4) :
+## C — d=256 live (perpétuel)
 
-- `ROMEO:` → `She the you to me I and ... I have you`
-- `JULIET:` → `What you to the ... wretrown`
-- `To be or not to be` → `of the the the to to find` + faux speaker `BRIZABETH`
-- `The king` → faux `PRIARENCE` / `BRIXENCE`
-
-Il a le **costume** (labels, retours ligne, thou/have). Pas la phrase.
-Plus de tokens sur ce 400k aide encore un peu (3.09→2.96) mais ça part en boucle `the/to`.
-Pour parler pour vrai : plus d'actifs (d=256+) ou un GPU. Pas un 3e bloc, pas un 100× de plus sur 400k.
+Nouveau fichier `fnn_d256.pt`. Resume via `RESUME_d256.json`.
+Voir `docs/LIVE.md`.
