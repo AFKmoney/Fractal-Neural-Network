@@ -6,22 +6,21 @@ Ce n’est **pas** un Transformer. Softmax L×L n’est pas le bloc.
 Ce n’est **pas** Fractus CTE (projet séparé).
 Ce n’est **pas** un checkpoint avec lequel chatter.
 
-Branche de travail : `clean/quarantine`.
-`main` n’a pas été écrasé.
+`main` = état vivant (merge `clean/quarantine` 2026-09-12).
 
 ```bash
-git clone -b clean/quarantine https://github.com/AFKmoney/Fractal-Neural-Network.git
+git clone https://github.com/AFKmoney/Fractal-Neural-Network.git
 cd Fractal-Neural-Network
 pip install torch
 ```
 
 ---
 
-## Pourquoi cette branche existe
+## Pourquoi le ménage
 
 Le repo May 2026 a été gonflé par des sessions Claude/ChatGPT : UI, PRISM, scripts « AGI », fichiers morts, le bloc FNN poussé vers un transformer.
 
-`clean/quarantine` garde le **bloc vivant** et liste le reste dans [`_quarantine/MANIFEST.md`](_quarantine/MANIFEST.md). On n’efface pas l’historique git.
+Le bloc vivant est ici. La greffe listée dans [`_quarantine/MANIFEST.md`](_quarantine/MANIFEST.md). Historique git intact.
 
 Cœur vivant :
 
