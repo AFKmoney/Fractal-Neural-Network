@@ -1,45 +1,31 @@
-# Chinchilla adapté — mini FNN (2026-09-11)
+# Chinchilla adapté — mini FNN
 
-Mesure sur le bloc vivant, flags greffe OFF.
-`d=64`, `n_blocks=2`, MoE 4 experts top-2, embed analytique (0 params).
+Bloc vivant seulement. Flags greffe OFF.
+`d=64`, 2 blocs, MoE 4→2, embed analytique.
 
 ## Params
 
 | | |
 |---|---|
 | Total | 110 976 |
-| MoE (experts) | 67 840 (~61 %) |
-| Actifs estimés | 77 056 (top-2 / 4) |
-| `lm_head` | 7 150 |
-| `blocks` | 103 698 |
+| Actifs (top-2/4) | 77 056 |
+| 20 × actifs | **1 541 120 tokens** |
+| 100 × actifs (overtrain) | 7.71 M |
 
-Chinchilla dense classique = 20 tokens / paramètre **total**.
-Ici on compte les **actifs**, comme pour un MoE : le reste des experts ne voit pas le token.
-
-| Règle | Tokens |
-|---|---|
-| 20 × total | 2.22 M |
-| 20 × actifs | **1.54 M** |
-| Overtrain petit modèle (≈100 × actifs) | 7.71 M |
-
-## Ce run
+## Run 20× (2026-09-12, CPU)
 
 | | |
 |---|---|
-| Tokens vus (200 + 4000 steps × 96) | ~0.40 M |
-| Fraction du 20 × actifs | **~26 %** |
-| Wall CPU | ~60 s |
-| Loss | 4.67 → 1.63 → **0.12** |
+| Tokens vus | **1 541 088** (100 % du 20×) |
+| Steps | 16 053 × seq 96 |
+| Wall | 213.5 s |
+| Loss | 4.68 → **0.032** |
 
-À 26 % Chinchilla le modèle a surtout **mémorisé** les 6 phrases du corpus. Pas un LM.
+Génération T=0.3 top-k=6 :
 
-Génération (T=0.4, top-k=8) :
+- `Je suis` → `Je suis un FNN. Le bloc est attention lineaire. Le soliton synchroni`
+- `Le bloc` → `... von Mises. Ce n'est pas un transformer.`
+- `Ce n'est` → `Ce n'est un FNN. Le bloc est attention lineaire. Le soliton synchronise la phase`
+- `Le transformer est` (hors ordre du corpus) → `Le transformer est. Ce n'est un transformer. Bonjour. Je suis un FNN.`
 
-- `Je suis` → `Je suis un FNN. Le bloc est est atention lineainea`
-- `Le bloc` → `Le bloc ests attention lineaire. Le soliton synchronise la phase.`
-- `Ce n'est` → traces de `attention lineaire` / `soliton`
-
-## Pour qu'il parle pour vrai
-
-Il manque encore ~1.1 M tokens au plan 20× actifs, et plutôt 7 M si on veut un petit modèle qui généralise.
-Tokenizer char (110) = plafond. BPE ensuite, pas plus de blocs.
+Verdict : le bloc apprend. À 20× sur 6 phrases il **récite la feuille**. Pas un LM. Prochaine étape data + BPE, pas plus de poids.
