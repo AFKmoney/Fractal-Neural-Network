@@ -1,0 +1,10 @@
+{
+  "run": "fnn-d256-live",
+  "tokens_seen": 409600,
+  "step": 800,
+  "loss": 3.824579954147339,
+  "d_model": 256,
+  "n_blocks": 2,
+  "active_params": 1067026,
+  "total_params": 1333778
+}
