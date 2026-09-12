@@ -4,7 +4,7 @@ Language-model block built from **fractal linear attention**, **Kuramoto phase**
 Not a Transformer encoder stack. Softmax self-attention is not the block.
 
 This branch (`clean/quarantine`) is a cleanup of the May 2026 “saved” tree.
-Claude/ChatGPT sessions piled UI, a second architecture (PRISM), AGI trainers, and unused modules on top of the FNN block. Those files are listed in [`_quarantine/MANIFEST.md`](_quarantine/MANIFEST.md). They are not deleted from git history (`main` is untouched).
+Claude/ChatGPT sessions piled UI, a second architecture (PRISM), AGI trainers, and unused modules on top of the FNN block. Those files are listed in [`_quarantine/MANIFEST.md`](_quarantine/MANIFEST.md). `main` is untouched.
 
 ## What the live block does
 
@@ -18,42 +18,24 @@ Optional (flags on `FNNConfig`, off on the mini run): causal DAG, self-model, wo
 
 Core files: `nfn/block.py`, `nfn/moe.py`, `nfn/phase_ode.py`, `nfn/model.py`, `nfn/config.py`, `nfn/analytic_embed.py`, `nfn/gematria.py`.
 
-`nfn/fractal.py` is a re-export of the three classes in `moe.py`.
+## Mini run (2026-09-11, CPU)
 
-## Quick start
+| | |
+|---|---|
+| Params | 110 976 total / ~77 056 actifs (MoE 4→2) |
+| Chinchilla 20× actifs | 1.54 M tokens |
+| Tokens vus | ~0.40 M (**26 %** du 20×) |
+| Loss | 4.67 → **0.12** |
+| Generate | commence à recracher les phrases du corpus |
+
+Détails : [`docs/CHINCHILLA.md`](docs/CHINCHILLA.md). Script : `examples/mini_train.py`.
 
 ```bash
-pip install torch
 git clone -b clean/quarantine https://github.com/AFKmoney/Fractal-Neural-Network.git
 cd Fractal-Neural-Network
+pip install torch
+python examples/mini_train.py
 ```
-
-```python
-import torch
-from nfn.config import FNNConfig
-from nfn.model import FNNModel
-from nfn.tokenizer import NFNTokenizer
-
-tok = NFNTokenizer()
-cfg = FNNConfig(
-    vocab_size=tok.vocab_size,
-    d_model=64, n_blocks=2, n_heads=2,
-    use_causal_graph=False,
-    use_self_model=False,
-    use_working_memory=False,
-    use_ads_cft=False,
-    use_mera=False,
-    use_godel_loop=False,
-    use_rg_flow=False,
-)
-model = FNNModel(cfg)
-x = torch.randint(0, cfg.vocab_size, (1, 32))
-logits, losses = model(x, targets=x)
-print(logits.shape, losses["lm"].item())
-```
-
-Mini train (2026-09-11, CPU): 2 blocks, d=64, ~111k params, 40 AdamW steps on a short French corpus.
-`loss_before=4.66` → `loss_after=2.75`. Smoke test, not a language model. Script: `examples/mini_train.py`.
 
 ## What this is not
 
